@@ -1,0 +1,32 @@
+module Types where
+
+import DA.Crypto.Text (BytesHex, PublicKeyHex, SignatureHex)
+
+-- | Which EVM call the MPC should build from the emitted params.
+data OperationType
+  = Erc20Transfer
+  | Erc20Approve
+  deriving (Eq, Show)
+
+-- | Explicit EVM transaction parameters emitted by Canton.
+-- The MPC uses these to deterministically build the raw transaction off-chain.
+data EvmTransactionParams = EvmTransactionParams
+  with
+    erc20Address   : BytesHex   -- 20 bytes, target token contract
+    recipient      : BytesHex   -- 20 bytes, destination address
+    amount         : BytesHex   -- 32 bytes, uint256
+    nonce          : BytesHex   -- 32 bytes, uint256
+    gasLimit       : BytesHex   -- 32 bytes, uint256
+    maxFeePerGas   : BytesHex   -- 32 bytes, uint256
+    maxPriorityFee : BytesHex   -- 32 bytes, uint256
+    chainId        : BytesHex   -- 32 bytes, uint256
+    value          : BytesHex   -- 32 bytes, uint256
+    operation      : OperationType
+  deriving (Eq, Show)
+
+-- | DER-encoded secp256k1 ECDSA signature + the signer's DER public key.
+data MpcSignature = MpcSignature
+  with
+    signature : SignatureHex
+    publicKey : PublicKeyHex
+  deriving (Eq, Show)

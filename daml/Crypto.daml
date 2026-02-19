@@ -1,0 +1,42 @@
+module Crypto where
+
+import DA.Optional (fromSome)
+import DA.Crypto.Text
+  ( BytesHex
+  , keccak256
+  , secp256k1WithEcdsaOnly
+  , packHexBytes
+  )
+
+import Types (EvmTransactionParams(..), MpcSignature(..))
+
+-- | Pad a hex value to the given byte width. Aborts on invalid input.
+padHex : BytesHex -> Int -> BytesHex
+padHex hex width = fromSome (packHexBytes hex width)
+
+-- | abi_encode_packed equivalent: concatenate all params at their canonical EVM widths.
+-- Matches the field ordering the MPC expects.
+packParams : EvmTransactionParams -> BytesHex
+packParams p =
+  padHex p.erc20Address   20  -- address  = 20 bytes
+    <> padHex p.recipient      20
+    <> padHex p.amount         32  -- uint256  = 32 bytes
+    <> padHex p.nonce          32
+    <> padHex p.gasLimit       32
+    <> padHex p.maxFeePerGas   32
+    <> padHex p.maxPriorityFee 32
+    <> padHex p.chainId        32
+    <> padHex p.value          32
+
+-- | Compute request_id = keccak256(packed params).
+computeRequestId : EvmTransactionParams -> BytesHex
+computeRequestId = keccak256 . packParams
+
+-- | Compute response_hash = keccak256(request_id || serialized_output).
+computeResponseHash : BytesHex -> BytesHex -> BytesHex
+computeResponseHash requestId output = keccak256 (requestId <> output)
+
+-- | Verify an MPC signature over a message using secp256k1 ECDSA (no extra hashing).
+verifyMpcSignature : MpcSignature -> BytesHex -> Bool
+verifyMpcSignature sig msg =
+  secp256k1WithEcdsaOnly sig.signature msg sig.publicKey

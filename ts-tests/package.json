@@ -1,0 +1,21 @@
+{
+  "name": "canton-mpc-poc-ts-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@daml.js/canton-mpc-poc-0.1.0": "file:./generated/model/canton-mpc-poc-0.1.0",
+    "@daml/types": "^3.4.11",
+    "@mojotech/json-type-validation": "^3.1.0",
+    "openapi-fetch": "^0.17.0",
+    "viem": "^2.23.0"
+  }
+}

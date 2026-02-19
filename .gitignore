@@ -1,0 +1,12 @@
+# Daml build artifacts
+.daml/
+
+# Logs
+log/
+
+# TypeScript
+ts-tests/node_modules/
+ts-tests/generated/
+
+# OS
+.DS_Store

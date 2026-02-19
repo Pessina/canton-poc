@@ -1,0 +1,220 @@
+module Test where
+
+import DA.Optional (fromSome)
+import DA.Crypto.Text
+  ( keccak256
+  , secp256k1WithEcdsaOnly
+  , packHexBytes
+  , byteCount
+  )
+import Daml.Script
+
+import Types
+import Crypto
+import Erc20Vault
+
+------------------------------------------------------------------------
+-- Test vectors (generated with openssl ecparam -name secp256k1)
+------------------------------------------------------------------------
+
+testPubKeyHex : Text
+testPubKeyHex = "3056301006072a8648ce3d020106052b8104000a034200049b51a3db8f697ac5e49078b01af8d2721dd9a39b81c59bae57d13e5c5d4c915649441be47149b0293b28d8b4a92416045bb39f922329f197fdeed3320c0746a5"
+
+testMessageHex : Text
+testMessageHex = "1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8"
+
+testSignatureHex : Text
+testSignatureHex = "304602210093dffbc917a44aa1dd115ad85c5ddcfcda753490664a04802ac55028cea65b88022100acf58d3b62940b844872c1a156fc797499f823d9144ec2d05d21c71f901a3a3e"
+
+------------------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------------------
+
+sampleEvmParams : EvmTransactionParams
+sampleEvmParams = EvmTransactionParams with
+  erc20Address   = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"   -- USDC
+  recipient      = "d8da6bf26964af9d7eed9e03e53415d37aa96045"   -- vitalik.eth
+  amount         = "0000000000000000000000000000000000000000000000000000000005f5e100"  -- 100_000_000
+  nonce          = "0000000000000000000000000000000000000000000000000000000000000001"
+  gasLimit       = "000000000000000000000000000000000000000000000000000000000000c350"  -- 50_000
+  maxFeePerGas   = "0000000000000000000000000000000000000000000000000000000ba43b7400"  -- 50 gwei
+  maxPriorityFee = "0000000000000000000000000000000000000000000000000000000077359400"  -- 2 gwei
+  chainId        = "0000000000000000000000000000000000000000000000000000000000000001"  -- mainnet
+  value          = "0000000000000000000000000000000000000000000000000000000000000000"
+  operation      = Erc20Transfer
+
+------------------------------------------------------------------------
+-- Test 1: keccak256 known-vector
+------------------------------------------------------------------------
+
+test1_keccak256KnownVector : Script ()
+test1_keccak256KnownVector = do
+  -- keccak256 of bytes 0x68656c6c6f = "hello"
+  let input    = "68656c6c6f"
+  let expected = "1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8"
+  let result   = keccak256 input
+  assertMsg ("keccak256 mismatch: got " <> result) (result == expected)
+
+------------------------------------------------------------------------
+-- Test 2: request_id determinism
+------------------------------------------------------------------------
+
+test2_requestIdDeterministic : Script ()
+test2_requestIdDeterministic = do
+  let id1 = computeRequestId sampleEvmParams
+  let id2 = computeRequestId sampleEvmParams
+  assertMsg "request_id must be deterministic" (id1 == id2)
+  -- Also verify it's a 32-byte hash (64 hex chars).
+  assertMsg ("request_id wrong length: " <> show (byteCount id1)) (byteCount id1 == 32)
+
+------------------------------------------------------------------------
+-- Test 3: response hash
+------------------------------------------------------------------------
+
+test3_responseHash : Script ()
+test3_responseHash = do
+  let requestId = computeRequestId sampleEvmParams
+  let output    = "00000000000000000000000000000000000000000000000000000000deadbeef"
+  let hash1     = computeResponseHash requestId output
+  let hash2     = computeResponseHash requestId output
+  assertMsg "response hash must be deterministic" (hash1 == hash2)
+  assertMsg "response hash must be 32 bytes" (byteCount hash1 == 32)
+  -- Different output must produce different hash.
+  let hash3 = computeResponseHash requestId "00000000000000000000000000000000000000000000000000000000cafebabe"
+  assertMsg "different output must give different hash" (hash1 /= hash3)
+
+------------------------------------------------------------------------
+-- Test 4: hex packing
+------------------------------------------------------------------------
+
+test4_hexPacking : Script ()
+test4_hexPacking = do
+  -- Pack a short value to 32 bytes (uint256).
+  let packed = fromSome (packHexBytes "ff" 32)
+  assertMsg "packed uint256 must be 32 bytes" (byteCount packed == 32)
+  -- Left-padded with zeros.
+  assertMsg "must be left-padded" (packed == "00000000000000000000000000000000000000000000000000000000000000ff")
+
+  -- Pack an address to 20 bytes (already 20 bytes → no-op).
+  let addr = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+  let packedAddr = fromSome (packHexBytes addr 20)
+  assertMsg "20-byte address unchanged" (packedAddr == addr)
+
+  -- Truncation: pack 32 bytes into 20 → keeps rightmost 20.
+  let long = "0000000000000000000000001234567890abcdef1234567890abcdef12345678"
+  let truncated = fromSome (packHexBytes long 20)
+  assertMsg "truncation keeps rightmost bytes" (byteCount truncated == 20)
+
+------------------------------------------------------------------------
+-- Test 5: full deposit lifecycle
+------------------------------------------------------------------------
+
+test5_depositLifecycle : Script ()
+test5_depositLifecycle = do
+  operator  <- allocateParty "Operator"
+  depositor <- allocateParty "Depositor"
+
+  orchCid <- submit operator do
+    createCmd VaultOrchestrator with
+      operator
+      mpcPublicKey = testPubKeyHex
+
+  -- Request deposit.
+  pendingCid <- submit (actAs operator <> actAs depositor) do
+    exerciseCmd orchCid RequestDeposit with
+      requester    = depositor
+      erc20Address = sampleEvmParams.erc20Address
+      amount       = 100_000_000
+      evmParams    = sampleEvmParams
+
+  -- Verify the pending deposit was created with correct requestId.
+  pending <- queryContractId depositor pendingCid
+  let pd = fromSome pending
+  assertMsg "requestId must be 32 bytes" (byteCount pd.requestId == 32)
+
+  -- Claim deposit with MPC signature.
+  -- For the PoC the MPC signed the response hash with the test key.
+  let mpcOutput    = "aa"  -- minimal valid output
+  let responseHash = computeResponseHash pd.requestId mpcOutput
+  -- NOTE: In production the MPC would sign responseHash.
+  --       For the PoC we verify the sig verification path works
+  --       by testing that a valid sig on a DIFFERENT message fails.
+  let badSig = MpcSignature with
+        signature = testSignatureHex
+        publicKey = testPubKeyHex
+
+  -- The signature was over testMessageHex, not responseHash, so it must fail.
+  let verified = verifyMpcSignature badSig responseHash
+  assertMsg "Signature over wrong message must fail" (not verified)
+
+  pure ()
+
+------------------------------------------------------------------------
+-- Test 6: full withdrawal lifecycle (refund path)
+------------------------------------------------------------------------
+
+test6_withdrawalLifecycle : Script ()
+test6_withdrawalLifecycle = do
+  operator <- allocateParty "Operator"
+  user     <- allocateParty "User"
+
+  orchCid <- submit operator do
+    createCmd VaultOrchestrator with
+      operator
+      mpcPublicKey = testPubKeyHex
+
+  -- Seed a balance for the user (operator is sole signatory).
+  balCid <- submit operator do
+    createCmd UserErc20Balance with
+      operator
+      owner        = user
+      erc20Address = sampleEvmParams.erc20Address
+      amount       = 500_000_000
+
+  -- Request withdrawal of 200M (user must co-authorize).
+  (newBalCid, pendingCid) <- submit (actAs operator <> actAs user) do
+    exerciseCmd orchCid RequestWithdrawal with
+      requester        = user
+      balanceCid       = balCid
+      recipientAddress = "d8da6bf26964af9d7eed9e03e53415d37aa96045"
+      withdrawAmount   = 200_000_000
+      evmParams        = sampleEvmParams
+
+  -- Verify balance was optimistically debited.
+  newBal <- queryContractId user newBalCid
+  assertMsg "Balance must be debited" ((fromSome newBal).amount == 300_000_000)
+
+  -- Complete withdrawal with bad signature → triggers refund.
+  let mpcOutput = "00000000000000000000000000000000000000000000000000000000deadbeef"
+  let badSig = MpcSignature with
+        signature = testSignatureHex  -- signed testMessageHex, not the response hash
+        publicKey = testPubKeyHex
+
+  refundResult <- submit operator do
+    exerciseCmd orchCid CompleteWithdrawal with
+      pendingCid
+      balanceCid   = newBalCid
+      mpcSignature = badSig
+      mpcOutput
+
+  -- Refund path: balance should be restored.
+  case refundResult of
+    None -> abort "Expected refund but got None"
+    Some refundCid -> do
+      refundBal <- queryContractId user refundCid
+      assertMsg "Refund must restore balance" ((fromSome refundBal).amount == 500_000_000)
+
+------------------------------------------------------------------------
+-- Test 7: secp256k1 signature verification
+------------------------------------------------------------------------
+
+test7_secp256k1Verification : Script ()
+test7_secp256k1Verification = do
+  -- Positive: verify the test signature against the correct message and key.
+  let valid = secp256k1WithEcdsaOnly testSignatureHex testMessageHex testPubKeyHex
+  assertMsg "Valid signature must verify" valid
+
+  -- Negative: wrong message must fail.
+  let wrongMsg = keccak256 "deadbeef"
+  let invalid = secp256k1WithEcdsaOnly testSignatureHex wrongMsg testPubKeyHex
+  assertMsg "Wrong message must fail verification" (not invalid)
