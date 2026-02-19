@@ -8,6 +8,9 @@ import {
   uploadDar,
   createContract,
   exerciseChoice,
+  type TransactionResponse,
+  type Event,
+  type CreatedEvent,
 } from "./canton-client.js";
 import {
   VaultOrchestrator,
@@ -18,6 +21,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const USER_BALANCE = UserErc20Balance.templateId;
+
+function getCreatedEvent(event: Event): CreatedEvent | undefined {
+  if ("CreatedEvent" in event) return event.CreatedEvent;
+  return undefined;
+}
+
+function getArgs(event: CreatedEvent): Record<string, unknown> {
+  return event.createArgument as Record<string, unknown>;
+}
+
+function findCreated(res: TransactionResponse, templateFragment: string) {
+  const event = res.transaction.events!.find((e) => {
+    const created = getCreatedEvent(e);
+    return created?.templateId?.includes(templateFragment);
+  });
+  return event ? getCreatedEvent(event)! : undefined;
+}
+
+function firstCreatedCid(res: TransactionResponse): string {
+  const created = getCreatedEvent(res.transaction.events![0]);
+  if (!created) throw new Error("First event is not a CreatedEvent");
+  return created.contractId;
+}
 
 // ---------------------------------------------------------------------------
 // Shared test params — must match Daml Test.daml sampleEvmParams exactly
@@ -100,8 +126,7 @@ describe("cross-runtime request_id", () => {
       VAULT_ORCHESTRATOR,
       { operator, mpcPublicKey: TEST_PUB_KEY },
     );
-    const orchCid =
-      orchResult.transaction.events![0].CreatedEvent!.contractId;
+    const orchCid = firstCreatedCid(orchResult);
 
     const depositResult = await exerciseChoice(
       ADMIN_USER,
@@ -117,13 +142,10 @@ describe("cross-runtime request_id", () => {
       },
     );
 
-    const pendingEvent = depositResult.transaction.events!.find(
-      (e) => e.CreatedEvent?.templateId?.includes("PendingDeposit"),
-    );
-    expect(pendingEvent).toBeDefined();
+    const pending = findCreated(depositResult, "PendingDeposit");
+    expect(pending).toBeDefined();
 
-    const cantonRequestId =
-      pendingEvent!.CreatedEvent!.createArgument.requestId as string;
+    const cantonRequestId = getArgs(pending!).requestId as string;
 
     expect(tsRequestId.slice(2)).toBe(cantonRequestId);
   }, 30_000);
@@ -140,8 +162,7 @@ describe("cross-runtime deposit lifecycle", () => {
       VAULT_ORCHESTRATOR,
       { operator, mpcPublicKey: TEST_PUB_KEY },
     );
-    const orchCid =
-      orchResult.transaction.events![0].CreatedEvent!.contractId;
+    const orchCid = firstCreatedCid(orchResult);
 
     const depositResult = await exerciseChoice(
       ADMIN_USER,
@@ -157,10 +178,9 @@ describe("cross-runtime deposit lifecycle", () => {
       },
     );
 
-    const pending = depositResult.transaction.events!.find(
-      (e) => e.CreatedEvent?.templateId?.includes("PendingDeposit"),
-    );
-    const args = pending!.CreatedEvent!.createArgument;
+    const pending = findCreated(depositResult, "PendingDeposit");
+    expect(pending).toBeDefined();
+    const args = getArgs(pending!);
 
     expect(args.requestId).toBe(computeRequestId(sampleEvmParams).slice(2));
     expect(args.amount).toBe("100000000");
@@ -180,8 +200,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
       VAULT_ORCHESTRATOR,
       { operator, mpcPublicKey: TEST_PUB_KEY },
     );
-    const orchCid =
-      orchResult.transaction.events![0].CreatedEvent!.contractId;
+    const orchCid = firstCreatedCid(orchResult);
 
     const balResult = await createContract(
       ADMIN_USER,
@@ -194,8 +213,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
         amount: "500000000",
       },
     );
-    const balCid =
-      balResult.transaction.events![0].CreatedEvent!.contractId;
+    const balCid = firstCreatedCid(balResult);
 
     const withdrawResult = await exerciseChoice(
       ADMIN_USER,
@@ -212,18 +230,14 @@ describe("cross-runtime withdrawal lifecycle", () => {
       },
     );
 
-    const pending = withdrawResult.transaction.events!.find(
-      (e) => e.CreatedEvent?.templateId?.includes("PendingWithdrawal"),
-    );
+    const pending = findCreated(withdrawResult, "PendingWithdrawal");
     expect(pending).toBeDefined();
-    expect(pending!.CreatedEvent!.createArgument.requestId).toBe(
+    expect(getArgs(pending!).requestId).toBe(
       computeRequestId(sampleEvmParams).slice(2),
     );
 
-    const newBal = withdrawResult.transaction.events!.find(
-      (e) => e.CreatedEvent?.templateId?.includes("UserErc20Balance"),
-    );
+    const newBal = findCreated(withdrawResult, "UserErc20Balance");
     expect(newBal).toBeDefined();
-    expect(newBal!.CreatedEvent!.createArgument.amount).toBe("300000000");
+    expect(getArgs(newBal!).amount).toBe("300000000");
   }, 30_000);
 });

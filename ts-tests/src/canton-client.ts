@@ -10,8 +10,9 @@ const BASE_URL = "http://localhost:7575";
 
 export const client = createClient<paths>({ baseUrl: BASE_URL });
 
-// Re-export generated types used by tests
-export type JsCreatedEvent = components["schemas"]["JsCreatedEvent"];
+export type CreatedEvent = components["schemas"]["CreatedEvent"];
+export type Event = components["schemas"]["Event"];
+export type Command = components["schemas"]["Command"];
 export type TransactionResponse =
   components["schemas"]["JsSubmitAndWaitForTransactionResponse"];
 
@@ -21,7 +22,12 @@ export type TransactionResponse =
 
 export async function allocateParty(hint: string): Promise<string> {
   const { data, error } = await client.POST("/v2/parties", {
-    body: { partyIdHint: hint, identityProviderId: "" },
+    body: {
+      partyIdHint: hint,
+      identityProviderId: "",
+      synchronizerId: "",
+      userId: "",
+    },
   });
   if (error) throw new Error(`allocateParty failed: ${JSON.stringify(error)}`);
   return data!.partyDetails!.party!;
@@ -77,7 +83,7 @@ export async function uploadDar(darPath: string): Promise<void> {
 export async function submitAndWait(
   userId: string,
   actAs: string[],
-  commands: components["schemas"]["JsCommand"][],
+  commands: Command[],
 ): Promise<TransactionResponse> {
   const { data, error } = await client.POST(
     "/v2/commands/submit-and-wait-for-transaction",
