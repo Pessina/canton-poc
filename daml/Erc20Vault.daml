@@ -1,4 +1,5 @@
 module Erc20Vault where
+-- TS: // erc20Vault.ts
 
 import DA.Crypto.Text (BytesHex, PublicKeyHex)
 
@@ -6,12 +7,20 @@ import Types (EvmTransactionParams, MpcSignature(..))
 import Crypto (computeRequestId, computeResponseHash, verifyMpcSignature)
 
 -- | Global vault configuration set once by the operator.
+-- NO TS EQUIVALENT — `template` defines a contract type that lives on the ledger.
+-- Think of it as a DB table schema with access control rules baked in.
+-- Each instance is a row persisted on-chain, created/archived only by authorized parties.
 template VaultConfig
   with
-    operator     : Party
+    operator     : Party   -- NO TS EQUIVALENT — ledger-level identity (like a wallet address)
     mpcPublicKey : PublicKeyHex
   where
     signatory operator
+    -- NO TS EQUIVALENT — `signatory` is the party whose authority is required to CREATE
+    -- this contract. Signatories are also automatically observers (they always see their contracts).
+    -- A contract can be archived by exercising a consuming choice — the controller of that
+    -- choice need not be the signatory, but the signatory's authority covers creation.
+    -- Think: only `operator`'s key can authorize INSERT; consuming choices act like DELETE.
 
 -- | Per-user ERC-20 balance tracked on Canton.
 template UserErc20Balance
@@ -21,8 +30,12 @@ template UserErc20Balance
     erc20Address : BytesHex
     amount       : Int
   where
-    signatory operator
-    observer owner
+    signatory operator   -- only operator can authorize creation
+    observer owner       -- NO TS EQUIVALENT — `observer` means `owner` can SEE this contract
+                         -- (it appears in their queries/subscriptions) but the observer role alone
+                         -- gives no right to modify or exercise choices. In this template,
+                         -- no choice lists `controller owner`, so owner is truly read-only here.
+                         -- Think: SELECT permission for owner. WRITE is gated by controller.
 
 -- | A deposit that is waiting for MPC confirmation.
 template PendingDeposit
@@ -61,14 +74,30 @@ template VaultOrchestrator
 
     -- Request a deposit: compute requestId, create PendingDeposit.
     nonconsuming choice RequestDeposit : ContractId PendingDeposit
+    -- NO TS EQUIVALENT — a `choice` is an action exercised on a live contract (like a method).
+    -- `nonconsuming` = calling it does NOT destroy the VaultOrchestrator; it stays alive.
+    -- (A `consuming` choice would archive it — like a one-time-use ticket.)
+    -- `: ContractId PendingDeposit` = return type — a typed, opaque handle to a specific
+    -- on-ledger contract. You cannot read its fields directly; you must call `fetch` first.
+    -- TS analogy: Promise<ContractId<PendingDeposit>> where ContractId<T> is a branded string
+    -- (the type parameter is enforced at compile time — you can't pass a ContractId<PendingDeposit>
+    -- where a ContractId<UserErc20Balance> is expected).
       with
         requester    : Party
         erc20Address : BytesHex
         amount       : Int
         evmParams    : EvmTransactionParams
+      -- Parameters to the choice (like function arguments).
       controller operator, requester
+      -- NO TS EQUIVALENT — `controller` specifies WHO can exercise this choice.
+      -- `operator, requester` is an AND condition: BOTH parties must independently authorize
+      -- the transaction. The ledger rejects it if either party's signature is missing.
+      -- TS analogy: a shared bank account requiring two separate holders to co-sign,
+      -- not one person using two factors — two distinct signers.
       do
         let requestId = computeRequestId evmParams
+        -- TS: const requestId = computeRequestId(evmParams);
+
         create PendingDeposit with
           operator
           requester
@@ -76,6 +105,13 @@ template VaultOrchestrator
           amount
           requestId
           evmParams
+        -- NO TS EQUIVALENT — `create` writes a new contract to the ledger (INSERT into active set).
+        -- Returns its ContractId. Authorization is checked at transaction submission:
+        -- all signatories of the new contract must have authorized somewhere in the transaction tree.
+        -- Here, `operator` is a signatory of PendingDeposit and also a controller of this choice,
+        -- so the requirement is satisfied automatically.
+        -- TS analogy: return await db.insert("PendingDeposit", { operator, requester, ... });
+        -- Note: `operator` alone is Daml shorthand for `operator = operator` (like ES6 { operator }).
 
     -- Claim a deposit: verify MPC signature, credit user balance.
     nonconsuming choice ClaimDeposit : ContractId UserErc20Balance
@@ -84,27 +120,50 @@ template VaultOrchestrator
         mpcSignature : MpcSignature
         mpcOutput    : BytesHex   -- serialized output from MPC (e.g. tx hash)
       controller operator
+      -- Only operator can claim (no user co-sign needed).
       do
         pending <- fetch pendingCid
+        -- NO TS EQUIVALENT (ledger primitive) — retrieves the contract's current fields.
+        -- `<-` is monadic bind — think `await` in async/await.
+        -- TS: const pending = await ledger.fetch<PendingDeposit>(pendingCid);
+        -- Fails if the contract has been archived. Disclosure (which parties can see this contract)
+        -- is enforced by the ledger's privacy model at transaction submission, not by fetch at runtime.
+
         archive pendingCid
+        -- NO TS EQUIVALENT (ledger primitive) — removes the contract from the active contract set.
+        -- The contract can no longer be fetched or exercised, but Canton's ledger is append-only:
+        -- the creation, exercise, and archival events remain permanently in ledger history.
+        -- TS: await ledger.archive(pendingCid);
+        -- This is inside a single Daml transaction: if any later assertMsg fails, this archive
+        -- is also rolled back — nothing is committed until the entire transaction succeeds.
+        -- Ensures a PendingDeposit can only be claimed ONCE (like consuming a UTXO).
 
         -- The MPC must have signed with the vault's registered key.
         assertMsg "MPC public key mismatch"
           (mpcSignature.publicKey == mpcPublicKey)
+        -- TS: if (mpcSignature.publicKey !== mpcPublicKey) throw new Error("MPC public key mismatch");
+        -- `assertMsg` aborts the ENTIRE transaction if false — including all prior operations
+        -- in this do-block (the fetch and archive above). The ledger is all-or-nothing: no partial state.
 
         -- Verify signature over response_hash = keccak256(requestId || output).
         let responseHash = computeResponseHash pending.requestId mpcOutput
+        -- TS: const responseHash = computeResponseHash(pending.requestId, mpcOutput);
+
         assertMsg "Invalid MPC signature on deposit response"
           (verifyMpcSignature mpcSignature responseHash)
+        -- TS: if (!verifyMpcSignature(mpcSignature, responseHash)) throw new Error("Invalid MPC signature");
 
         create UserErc20Balance with
           operator
           owner = pending.requester
           erc20Address = pending.erc20Address
           amount = pending.amount
+        -- TS: return await db.insert("UserErc20Balance", { operator, owner: pending.requester, ... });
 
     -- Request a withdrawal: check balance, debit optimistically, create PendingWithdrawal.
     nonconsuming choice RequestWithdrawal : (ContractId UserErc20Balance, ContractId PendingWithdrawal)
+    -- Returns a TUPLE of two ContractIds.
+    -- TS: Promise<[ContractId<UserErc20Balance>, ContractId<PendingWithdrawal>]>
       with
         requester        : Party
         balanceCid       : ContractId UserErc20Balance
@@ -112,16 +171,27 @@ template VaultOrchestrator
         withdrawAmount   : Int
         evmParams        : EvmTransactionParams
       controller operator, requester
+      -- Both must co-sign. Prevents operator withdrawing without user consent,
+      -- and user withdrawing without operator's system processing it.
       do
         bal <- fetch balanceCid
         archive balanceCid
+        -- Fetch current balance, then archive it (consume it).
+        -- This is the UTXO pattern: destroy old balance, create new one with updated amount.
+        -- There's no "UPDATE SET amount = ..." — always delete-old + create-new.
+        -- `bal` now holds the last known fields of the archived contract (all Daml values are immutable).
 
         assertMsg "Insufficient balance" (bal.amount >= withdrawAmount)
+        -- TS: if (bal.amount < withdrawAmount) throw new Error("Insufficient balance");
 
         let requestId = computeRequestId evmParams
 
         -- Optimistically debit.
         newBalCid <- create bal with amount = bal.amount - withdrawAmount
+        -- `bal with amount = ...` is Daml's record update syntax — creates a NEW record value,
+        -- leaving `bal` unchanged (all Daml values are immutable).
+        -- TS: const newBal = { ...bal, amount: bal.amount - withdrawAmount };  // bal is untouched
+        --     const newBalCid = await db.insert("UserErc20Balance", newBal);
 
         pendingCid <- create PendingWithdrawal with
           operator
@@ -133,9 +203,15 @@ template VaultOrchestrator
           evmParams
 
         pure (newBalCid, pendingCid)
+        -- `pure` lifts a plain value into the Update action context — no ledger operations occur.
+        -- Equivalent to returning a value from an async function without doing any awaits.
+        -- TS: return [newBalCid, pendingCid];
 
-    -- Complete a withdrawal: verify signature. On failure (0xDEADBEEF), refund.
+    -- Complete a withdrawal: verify signature. On failure, refund.
     nonconsuming choice CompleteWithdrawal : Optional (ContractId UserErc20Balance)
+    -- `Optional T` = TS `T | null`. `None` = null, `Some(x)` = the unwrapped value.
+    -- Returns Some(contractId) on refund (failure), None/null on success.
+    -- TS: Promise<string | null>
       with
         pendingCid   : ContractId PendingWithdrawal
         balanceCid   : ContractId UserErc20Balance
@@ -152,12 +228,19 @@ template VaultOrchestrator
         let responseHash = computeResponseHash pending.requestId mpcOutput
 
         if verifyMpcSignature mpcSignature responseHash
+        -- TS: if (verifyMpcSignature(mpcSignature, responseHash)) {
           then
             -- Success: withdrawal confirmed on EVM side.
             pure None
+            -- TS: return null;  // balance stays debited
           else do
             -- Failure: refund the debited amount.
             bal <- fetch balanceCid
             archive balanceCid
             refundCid <- create bal with amount = bal.amount + pending.amount
+            -- TS: const bal = await ledger.fetch(balanceCid);
+            --     await ledger.archive(balanceCid);
+            --     const refundCid = await db.insert("UserErc20Balance", { ...bal, amount: bal.amount + pending.amount });
             pure (Some refundCid)
+            -- `Some refundCid` wraps the value in Optional — the caller receives the ContractId.
+            -- TS: return refundCid;  // non-null means refund was issued
