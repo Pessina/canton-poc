@@ -6,22 +6,6 @@ import DA.Crypto.Text (BytesHex, PublicKeyHex)
 import Types (EvmTransactionParams, MpcSignature(..))
 import Crypto (computeRequestId, computeResponseHash, verifyMpcSignature)
 
--- | Global vault configuration set once by the operator.
--- NO TS EQUIVALENT — `template` defines a contract type that lives on the ledger.
--- Think of it as a DB table schema with access control rules baked in.
--- Each instance is a row persisted on-chain, created/archived only by authorized parties.
-template VaultConfig
-  with
-    operator     : Party   -- NO TS EQUIVALENT — ledger-level identity (like a wallet address)
-    mpcPublicKey : PublicKeyHex
-  where
-    signatory operator
-    -- NO TS EQUIVALENT — `signatory` is the party whose authority is required to CREATE
-    -- this contract. Signatories are also automatically observers (they always see their contracts).
-    -- A contract can be archived by exercising a consuming choice — the controller of that
-    -- choice need not be the signatory, but the signatory's authority covers creation.
-    -- Think: only `operator`'s key can authorize INSERT; consuming choices act like DELETE.
-
 -- | Per-user ERC-20 balance tracked on Canton.
 template UserErc20Balance
   with
