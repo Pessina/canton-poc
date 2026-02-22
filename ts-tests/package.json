@@ -4,16 +4,20 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "observe": "tsx src/mpc-observer.ts",
+    "deposit": "tsx src/trigger-deposit.ts",
+    "demo": "tsx src/demo.ts"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
     "openapi-typescript": "^7.13.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@daml.js/canton-mpc-poc-0.1.0": "file:./generated/model/canton-mpc-poc-0.1.0",
+    "@daml.js/canton-mpc-poc-0.2.0": "file:./generated/model/canton-mpc-poc-0.2.0",
     "@daml/types": "^3.4.11",
     "@mojotech/json-type-validation": "^3.1.0",
     "openapi-fetch": "^0.17.0",

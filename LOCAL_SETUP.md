@@ -1,49 +1,42 @@
-# Canton MPC PoC — Local Setup Guide
+# Canton MPC PoC — Local Setup Guide (Sandbox)
 
-## Components
+This guide covers running the canton-mpc-poc project using the DPM in-memory sandbox. This is the recommended path for contract development, testing, and initial MPC integration work.
+
+---
+
+## Architecture (Sandbox Mode)
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Canton Synchronizer                 │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐ │
-│  │ Sequencer│  │ Mediator │  │ Sync Manager  │ │
-│  │  :10018  │  │  :10028  │  │   :10038      │ │
-│  └──────────┘  └──────────┘  └───────────────┘ │
-└────────────────────┬────────────────────────────┘
-                     │
-        ┌────────────┴────────────┐
-        │                         │
-┌───────┴────────┐       ┌───────┴────────┐
-│ Participant 1  │       │ Participant 2  │
-│ (Operator)     │       │ (Users)        │
-│ gRPC    :5011  │       │ gRPC    :5021  │
-│ JSON    :7575  │       │ JSON    :7585  │
-│ Admin   :5012  │       │ Admin   :5022  │
-└───────┬────────┘       └───────┬────────┘
-        │                         │
-  ┌─────┴──────┐          ┌──────┴──────┐
-  │ MPC Node   │          │ User App    │
-  │ (Rust,     │          │ (Frontend)  │
-  │  tonic)    │          │             │
-  └────────────┘          └─────────────┘
-        │
-  ┌─────┴──────┐
-  │ PostgreSQL │
-  │  :5432     │
-  └────────────┘
+┌─────────────────────────────────────────────────────────┐
+│           Canton Sandbox (single JVM process)            │
+│                                                          │
+│  ┌────────────┐  ┌──────────┐  ┌────────────────────┐  │
+│  │ Sequencer  │  │ Mediator │  │ Participant        │  │
+│  │ (internal) │  │(internal)│  │ gRPC  :6865        │  │
+│  └────────────┘  └──────────┘  │ JSON  :7575        │  │
+│                                └─────────┬──────────┘  │
+└──────────────────────────────────────────┼──────────────┘
+                                           │
+                   ┌───────────────────────┼───────────────┐
+                   │                       │               │
+             ┌─────┴──────┐      ┌────────┴────┐    ┌─────┴──────┐
+             │ MPC Node   │      │ TypeScript  │    │   curl     │
+             │ (Rust,     │      │ Tests       │    │   (manual) │
+             │  tonic)    │      │ (vitest)    │    │            │
+             └────────────┘      └─────────────┘    └────────────┘
 ```
 
-### What each component does
+### What the sandbox provides
 
-| Component | Role |
-|-----------|------|
-| **Sequencer** | Orders all messages in the synchronizer (total-order multicast) |
-| **Mediator** | Aggregates validation responses from participants |
-| **Sync Manager** | Validates topology changes |
-| **Participant 1** | Hosts the Operator party, runs VaultOrchestrator contracts |
-| **Participant 2** | Hosts user parties (optional for PoC — single participant works) |
-| **MPC Node (Rust)** | Subscribes to ledger events, signs EVM transactions, submits results back |
-| **PostgreSQL** | Persistent storage for all Canton nodes |
+| Component | Description |
+|-----------|-------------|
+| **Sequencer** | Orders all messages (runs in-process, no exposed port) |
+| **Mediator** | Aggregates validation responses (runs in-process, no exposed port) |
+| **Participant** | Hosts all parties, runs contracts, exposes Ledger APIs |
+| **JSON Ledger API** | REST + WebSocket interface at `http://localhost:7575` |
+| **gRPC Ledger API** | Streaming interface at `localhost:6865` |
+
+In sandbox mode all Canton components run in a single JVM process with in-memory storage. Data is lost on restart.
 
 ---
 
@@ -54,189 +47,286 @@
 | `npx hardhat compile` | `dpm build` |
 | `npx hardhat test` | `dpm test` |
 | `npx hardhat node` | `dpm sandbox` |
-| `hardhat run deploy.js` | `curl --data-binary @.dar http://localhost:7575/v2/packages` |
-| ethers.js / web3.js | gRPC via `tonic` (Rust) or JSON API via `reqwest` |
-| Hardhat console | Canton Console (`./bin/canton -c config/...`) |
-| `hardhat.config.js` | `daml.yaml` + `canton.conf` |
+| `hardhat run deploy.js` | `curl -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` |
+| ethers.js / web3.js | gRPC via `tonic` (Rust) or JSON Ledger API v2 via `fetch`/`reqwest` |
+| Hardhat console | Canton Console (`./bin/canton -c config/...`) — not needed for sandbox |
+| `hardhat.config.js` | `daml.yaml` |
 
 > **Note:** SDK 3.4 uses `dpm` (Digital Asset Package Manager) — the old `daml` CLI is deprecated.
 
 ---
 
-## Path 1: Quick Start (In-Memory Sandbox)
+## Prerequisites
 
-Best for contract development and initial MPC integration testing. No persistence.
+### 1. Install JDK 17+
 
-### Prerequisites
+Canton runs on the JVM. You need JDK 17 or higher.
 
 ```bash
-# Install dpm
-curl -sSL https://get.digitalasset.com/install/install.sh | sh -s
-dpm version --active
+# macOS (Homebrew)
+brew install openjdk@17
+
+# Set JAVA_HOME (add to ~/.zshrc for persistence)
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+
+# Verify
+java -version   # Must be 17+
+echo $JAVA_HOME
 ```
 
-### Steps
+### 2. Install DPM
 
 ```bash
-# 1. Build the DAR
-dpm build
-# Output: .daml/dist/canton-mpc-poc-0.1.0.dar
+curl https://get.digitalasset.com/install/install.sh | sh
 
-# 2. Run offline tests (no Canton needed)
-dpm test
+# Add to PATH (add to ~/.zshrc for persistence)
+export PATH="$HOME/.dpm/bin:$PATH"
 
-# 3. Start sandbox (1 participant + 1 synchronizer, in-memory)
-dpm sandbox
-# gRPC Ledger API → localhost:5011
-# JSON Ledger API → localhost:7575
+# Install the SDK version this project uses
+dpm install 3.4.11
 
-# 4. Upload DAR (in another terminal)
-curl --data-binary @.daml/dist/canton-mpc-poc-0.1.0.dar \
-  http://localhost:7575/v2/packages
+# Verify
+dpm version
+```
 
-# 5. Allocate parties
-curl -d '{"partyIdHint":"Operator"}' http://localhost:7575/v2/parties
-curl -d '{"partyIdHint":"Depositor"}' http://localhost:7575/v2/parties
+### 3. Increase JVM Memory (recommended)
 
-# 6. Run MPC node (connects to gRPC at localhost:5011)
-cd mpc-node && cargo run
+Canton can be memory-hungry. Set at least 4 GB heap:
+
+```bash
+export _JAVA_OPTIONS="-Xmx4g"
 ```
 
 ---
 
-## Path 2: Multi-Node with Docker + PostgreSQL
+## Step-by-Step: Sandbox Development
 
-Best for realistic integration testing and PoC demos. Persistent storage, multi-participant topology.
-
-### Prerequisites
-
-- Docker Desktop (8 GB+ memory allocated)
-- PostgreSQL (via Docker or local install)
-- Canton Community Edition: `docker pull digitalasset/canton-open-source:3.4.11`
-  - Or download binary from https://github.com/digital-asset/canton/releases
-
-### canton.conf (minimal)
-
-```hocon
-canton {
-  participants {
-    participant1 {
-      storage.type = postgres
-      storage.config {
-        url = "jdbc:postgresql://localhost:5432/participant1"
-        user = canton
-        password = canton
-      }
-      ledger-api {
-        address = "0.0.0.0"
-        port = 5011
-      }
-      admin-api {
-        address = "0.0.0.0"
-        port = 5012
-      }
-      http-ledger-api {
-        address = "0.0.0.0"
-        port = 7575
-      }
-    }
-  }
-
-  sequencers {
-    sequencer1 {
-      storage.type = postgres
-      storage.config {
-        url = "jdbc:postgresql://localhost:5432/sequencer1"
-        user = canton
-        password = canton
-      }
-      public-api.port = 10018
-      admin-api.port = 10019
-    }
-  }
-
-  mediators {
-    mediator1 {
-      storage.type = postgres
-      storage.config {
-        url = "jdbc:postgresql://localhost:5432/mediator1"
-        user = canton
-        password = canton
-      }
-      admin-api.port = 10028
-    }
-  }
-}
-```
-
-### Bootstrap in Canton Console
+### Step 1: Build the DAR
 
 ```bash
-# Start Canton with interactive console
-./bin/canton -c canton.conf
+dpm build
+# Output: .daml/dist/canton-mpc-poc-0.2.0.dar
 ```
 
-```scala
-// 1. Bootstrap the synchronizer
-bootstrap.synchronizer(
-  synchronizerName = "mySynchronizer",
-  sequencers = sequencers.all,
-  mediators = mediators.all,
-  synchronizerOwners = Seq(sequencer1),
-  synchronizerThreshold = PositiveInt.one,
-  staticSynchronizerParameters =
-    StaticSynchronizerParameters
-      .defaultsWithoutKMS(ProtocolVersion.latest)
-)
+This compiles all `.daml` files in the `daml/` directory into a DAR (Daml Archive). The output path is determined by `name` and `version` in `daml.yaml`.
 
-// 2. Connect participant to synchronizer
-participant1.synchronizers.connect(
-  "mySynchronizer",
-  "https://localhost:10018"
-)
+### Step 2: Run Offline Tests
 
-// 3. Upload DAR
-participant1.dars.upload("/path/to/canton-mpc-poc-0.1.0.dar")
+```bash
+# Run all tests
+dpm test
 
-// 4. Allocate parties
-val operator = participant1.parties.enable("Operator")
-val depositor = participant1.parties.enable("Depositor")
+# Run a specific test
+dpm test --test-pattern "test5_depositLifecycle"
 
-// 5. Create user for MPC bot with actAs rights
-participant1.users.create("mpc-bot", actAsParties = Set(operator))
+# Run tests from a specific file
+dpm test --files daml/Test.daml
 ```
+
+Tests execute against an in-memory ledger — no Canton sandbox needed. This is the fastest feedback loop for contract logic.
+
+### Step 3: Start the Sandbox
+
+```bash
+# Start sandbox with DAR loaded at startup
+dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar
+```
+
+This starts a full Canton node with:
+- JSON Ledger API at `http://localhost:7575`
+- gRPC Ledger API at `localhost:6865`
+
+The sandbox runs in the foreground. Use `Ctrl+C` to stop it. Leave this terminal running and open a new one for the next steps.
+
+**Wait for readiness** before proceeding:
+
+```bash
+# Poll until the JSON API is up (retry for ~20 seconds)
+curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:7575/health
+```
+
+### Step 4: Allocate Parties
+
+Party IDs include a namespace suffix (`::1220...`). Save the full IDs from the responses — you need them for all subsequent API calls.
+
+```bash
+# Allocate the Operator party
+curl -s -X POST http://localhost:7575/v2/parties \
+  -H "Content-Type: application/json" \
+  -d '{"partyIdHint": "Operator", "identityProviderId": ""}'
+# Response: {"partyDetails":{"party":"Operator::1220abcd...","isLocal":true,...}}
+
+# Allocate the Depositor party
+curl -s -X POST http://localhost:7575/v2/parties \
+  -H "Content-Type: application/json" \
+  -d '{"partyIdHint": "Depositor", "identityProviderId": ""}'
+# Response: {"partyDetails":{"party":"Depositor::1220efgh...","isLocal":true,...}}
+```
+
+### Step 5: Create a User with Rights
+
+Commands require a `userId`. Create a user with `CanActAs` and `CanReadAs` rights for both parties:
+
+```bash
+curl -s -X POST http://localhost:7575/v2/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user": {
+      "id": "admin-user",
+      "primaryParty": "Operator::1220...",
+      "isDeactivated": false,
+      "identityProviderId": ""
+    },
+    "rights": [
+      {"kind": {"CanActAs": {"value": {"party": "Operator::1220..."}}}},
+      {"kind": {"CanReadAs": {"value": {"party": "Operator::1220..."}}}},
+      {"kind": {"CanActAs": {"value": {"party": "Depositor::1220..."}}}},
+      {"kind": {"CanReadAs": {"value": {"party": "Depositor::1220..."}}}}
+    ]
+  }'
+```
+
+Replace `Operator::1220...` and `Depositor::1220...` with the actual full party IDs from Step 4.
+
+### Step 6: Create the VaultOrchestrator Contract
+
+```bash
+curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transaction \
+  -H "Content-Type: application/json" \
+  -d '{
+    "commands": {
+      "commands": [
+        {
+          "CreateCommand": {
+            "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
+            "createArguments": {
+              "operator": "Operator::1220...",
+              "mpcPublicKey": "3056301006072a8648ce3d020106052b8104000a034200049b51a3db8f697ac5e49078b01af8d2721dd9a39b81c59bae57d13e5c5d4c915649441be47149b0293b28d8b4a92416045bb39f922329f197fdeed3320c0746a5"
+            }
+          }
+        }
+      ],
+      "commandId": "create-orchestrator-001",
+      "userId": "admin-user",
+      "actAs": ["Operator::1220..."],
+      "readAs": ["Operator::1220..."]
+    }
+  }'
+```
+
+The response contains the created contract's ID — save it for exercising choices.
+
+> **Template ID format:** `#packageName:ModuleName:TemplateName` — the `#` prefix enables package-name resolution so you don't need the full package hash.
+
+### Step 7: Query Active Contracts
+
+Verify the orchestrator was created:
+
+```bash
+curl -s -X POST http://localhost:7575/v2/state/active-contracts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filter": {
+      "filtersByParty": {
+        "Operator::1220...": {
+          "cumulative": {
+            "templateFilters": [
+              {
+                "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
+                "includeCreatedEventBlob": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  }'
+```
+
+### Step 8: Exercise Choices (Example: RequestDeposit)
+
+```bash
+curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transaction \
+  -H "Content-Type: application/json" \
+  -d '{
+    "commands": {
+      "commands": [
+        {
+          "ExerciseCommand": {
+            "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
+            "contractId": "<orchestrator-contract-id>",
+            "choice": "RequestDeposit",
+            "choiceArgument": {
+              "requester": "Depositor::1220...",
+              "erc20Address": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": "100000000.0",
+              "evmParams": {
+                "erc20Address": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "recipient": "d8da6bf26964af9d7eed9e03e53415d37aa96045",
+                "amount": "0000000000000000000000000000000000000000000000000000000005f5e100",
+                "nonce": "0000000000000000000000000000000000000000000000000000000000000001",
+                "gasLimit": "000000000000000000000000000000000000000000000000000000000000c350",
+                "maxFeePerGas": "0000000000000000000000000000000000000000000000000000000ba43b7400",
+                "maxPriorityFee": "0000000000000000000000000000000000000000000000000000000077359400",
+                "chainId": "0000000000000000000000000000000000000000000000000000000000000001",
+                "value": "0000000000000000000000000000000000000000000000000000000000000000",
+                "operation": "Erc20Transfer"
+              }
+            }
+          }
+        }
+      ],
+      "commandId": "deposit-request-001",
+      "userId": "admin-user",
+      "actAs": ["Operator::1220...", "Depositor::1220..."],
+      "readAs": ["Operator::1220...", "Depositor::1220..."]
+    }
+  }'
+```
+
+> **Multi-controller note:** `RequestDeposit` requires `controller operator, requester` — both parties must be in `actAs`.
+
+---
+
+## Contract Templates
+
+| Template | Module | Description |
+|----------|--------|-------------|
+| `VaultOrchestrator` | `Erc20Vault` | Drives the deposit/withdraw state machine |
+| `PendingDeposit` | `Erc20Vault` | Deposit waiting for MPC confirmation |
+| `PendingWithdrawal` | `Erc20Vault` | Withdrawal waiting for MPC execution |
+| `UserErc20Balance` | `Holding` | Per-user ERC-20 balance (CIP-56 Holding) |
+| `VaultTransferFactory` | `Transfer` | CIP-56 TransferFactory for transfers |
+| `VaultTransferInstruction` | `Transfer` | CIP-56 TransferInstruction (accept/reject/withdraw) |
+
+### Choice Map
+
+| Template | Choice | Type | Controller | Returns |
+|----------|--------|------|------------|---------|
+| `VaultOrchestrator` | `RequestDeposit` | nonconsuming | operator, requester | `ContractId PendingDeposit` |
+| `VaultOrchestrator` | `ClaimDeposit` | nonconsuming | operator | `ContractId UserErc20Balance` |
+| `VaultOrchestrator` | `RequestWithdrawal` | nonconsuming | operator, requester | `(Optional (ContractId UserErc20Balance), ContractId PendingWithdrawal)` |
+| `VaultOrchestrator` | `CompleteWithdrawal` | nonconsuming | operator | `Optional (ContractId UserErc20Balance)` |
+| `VaultOrchestrator` | `ExecuteTransfer` | nonconsuming | operator, sender | `TransferInstructionResult` |
 
 ---
 
 ## MPC Node Connection
 
-The Rust MPC node connects to **Participant 1's Ledger API** only. It never touches the sequencer, mediator, or sync manager directly.
+The Rust MPC node connects to the Participant's gRPC Ledger API only. It never touches the sequencer or mediator directly.
 
-### APIs available
+### Endpoints
 
 | API | Endpoint | Use |
 |-----|----------|-----|
-| **gRPC Ledger API** | `localhost:5011` | Primary — streaming events + command submission |
-| **JSON Ledger API** | `localhost:7575` | Alternative — REST + WebSocket |
-
-### Authentication
-
-For local development, use HMAC-256 (unsafe, testing only):
-
-```hocon
-canton.participants.participant1.ledger-api.auth-services = [{
-  type = unsafe-jwt-hmac-256
-  secret = "test-secret"
-}]
-```
-
-For production, use RS256 with a certificate or JWKS endpoint.
+| **gRPC Ledger API** | `localhost:6865` | Primary — streaming events + command submission |
+| **JSON Ledger API** | `http://localhost:7575` | REST + WebSocket alternative |
 
 ### MPC Node Flow
 
 ```
 1. STARTUP
-   ├── Connect gRPC channel to localhost:5011 with JWT
+   ├── Connect gRPC channel to localhost:6865
    ├── StateService::GetActiveContracts → load existing PendingDeposit/PendingWithdrawal
    └── Record offset
 
@@ -290,12 +380,22 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 1. Edit Daml contracts    →  daml/*.daml
 2. Build                  →  dpm build
 3. Test (offline)         →  dpm test
-4. Start Canton           →  dpm sandbox  (or Docker multi-node)
-5. Deploy DAR             →  curl --data-binary @.dar http://localhost:7575/v2/packages
-6. Setup parties          →  curl -d '{"partyIdHint":"Operator"}' .../v2/parties
-7. Run MPC node           →  cargo run  (connects to gRPC :5011)
-8. Iterate                →  Edit → dpm build → re-upload DAR
+4. Start Canton           →  dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar
+5. Wait for health        →  curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:7575/health
+6. Setup parties + user   →  POST /v2/parties + POST /v2/users (see steps 4-5 above)
+7. Create contracts       →  POST /v2/commands/submit-and-wait-for-transaction
+8. Run MPC node           →  cargo run  (connects to gRPC :6865)
+9. Iterate                →  Ctrl+C sandbox → dpm build → restart sandbox
 ```
+
+### Key Points
+
+- The sandbox uses in-memory storage — **all data is lost on restart**
+- After changing Daml templates, you must `dpm build` and restart the sandbox
+- Party IDs change on each sandbox restart (they include a unique namespace hash)
+- `vetAllPackages=true` is required when uploading DARs to make templates available
+- Always use the full party ID (`Operator::1220...`), never just `Operator`
+- Command submission has double nesting: outer `commands` object wraps inner `commands` array
 
 ---
 
@@ -305,12 +405,68 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 |---------|---------|
 | `dpm build` | Compile Daml to .dar |
 | `dpm test` | Run all Daml Script tests |
-| `dpm sandbox` | Start in-memory Canton sandbox |
-| `dpm script --ledger-host localhost --ledger-port 5011 --script-name Test:test5_depositLifecycle` | Run script against live Canton |
-| `curl http://localhost:7575/v2/packages` | List uploaded packages |
-| `curl http://localhost:7575/v2/parties` | List allocated parties |
-| `curl -X POST http://localhost:7575/v2/state/active-contracts -d '{...}'` | Query active contracts |
-| `curl http://localhost:7575/docs/openapi` | OpenAPI spec (JSON API reference) |
+| `dpm test --test-pattern "testName"` | Run a specific test |
+| `dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar` | Start sandbox with DAR |
+| `curl http://localhost:7575/health` | Health check (HTTP 200 = ready) |
+| `curl -s -X POST http://localhost:7575/v2/parties -H "Content-Type: application/json" -d '{"partyIdHint":"Alice","identityProviderId":""}'` | Allocate a party |
+| `curl -s -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` | Upload DAR (if not loaded at startup) |
+| `curl http://localhost:7575/docs/openapi` | OpenAPI spec (YAML) |
+| `curl http://localhost:7575/docs/asyncapi` | AsyncAPI spec (WebSocket) |
+| `dpm daml script --dar .daml/dist/canton-mpc-poc-0.2.0.dar --script-name Test:test5_depositLifecycle --ledger-host localhost --ledger-port 6865` | Run a Daml Script against live sandbox |
+
+---
+
+## Troubleshooting
+
+### Java Not Found
+
+```bash
+# Check if Java is installed
+java -version
+
+# If not installed (macOS)
+brew install openjdk@17
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+```
+
+### Port Already in Use
+
+```bash
+lsof -i :7575
+lsof -i :6865
+kill <PID>
+
+# Or use different ports
+dpm sandbox --json-api-port 7576 --canton-port 6866
+```
+
+### Sandbox Crashes on Startup
+
+1. Check JVM memory: `export _JAVA_OPTIONS="-Xmx4g"`
+2. Clear sandbox state: `rm -rf .canton`
+3. Ensure DAR was built with same SDK version: `grep sdk-version daml.yaml && dpm version`
+
+### "KNOWN_PACKAGE_VERSION" on DAR Upload
+
+The DAR is already uploaded. Safe to ignore — this is idempotent behavior.
+
+### Party Not Found
+
+Party IDs include a namespace suffix. Always use the full ID returned from `/v2/parties`:
+- Correct: `Operator::122034ab...5678`
+- Wrong: `Operator`
+
+### Command Fails with INVALID_ARGUMENT
+
+- Check that `actAs` includes all required signatories/controllers for the choice
+- Verify template ID format uses `#` prefix: `#canton-mpc-poc:Erc20Vault:VaultOrchestrator`
+- Ensure all required fields are present in `createArguments` or `choiceArgument`
+
+### Template Not Found After DAR Upload
+
+- Ensure `vetAllPackages=true` was in the upload URL
+- Module and template names are case-sensitive
+- Verify the DAR was actually uploaded: check the upload response for package IDs
 
 ---
 

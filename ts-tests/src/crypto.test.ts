@@ -15,7 +15,7 @@ import {
 import {
   VaultOrchestrator,
   UserErc20Balance,
-} from "../generated/model/canton-mpc-poc-0.1.0/lib/Erc20Vault/module.js";
+} from "../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -102,7 +102,7 @@ const ADMIN_USER = `admin-${RUN_ID}`;
 beforeAll(async () => {
   const darPath = resolve(
     __dirname,
-    "../../.daml/dist/canton-mpc-poc-0.1.0.dar",
+    "../../.daml/dist/canton-mpc-poc-0.2.0.dar",
   );
   await uploadDar(darPath);
 
@@ -113,8 +113,7 @@ beforeAll(async () => {
 }, 30_000);
 
 // ---------------------------------------------------------------------------
-// Cross-runtime request_id: TS computes locally, Canton computes via
-// RequestDeposit choice, then we compare.
+// Cross-runtime request_id
 // ---------------------------------------------------------------------------
 describe("cross-runtime request_id", () => {
   it("TypeScript request_id matches Canton's request_id from RequestDeposit", async () => {
@@ -137,7 +136,7 @@ describe("cross-runtime request_id", () => {
       {
         requester: depositor,
         erc20Address: damlEvmParams.erc20Address,
-        amount: "100000000",
+        amount: "100000000.0",
         evmParams: damlEvmParams,
       },
     );
@@ -152,7 +151,7 @@ describe("cross-runtime request_id", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cross-runtime deposit lifecycle: verify all PendingDeposit fields match.
+// Cross-runtime deposit lifecycle
 // ---------------------------------------------------------------------------
 describe("cross-runtime deposit lifecycle", () => {
   it("deposit creates PendingDeposit with matching requestId", async () => {
@@ -173,7 +172,7 @@ describe("cross-runtime deposit lifecycle", () => {
       {
         requester: depositor,
         erc20Address: damlEvmParams.erc20Address,
-        amount: "100000000",
+        amount: "100000000.0",
         evmParams: damlEvmParams,
       },
     );
@@ -183,14 +182,14 @@ describe("cross-runtime deposit lifecycle", () => {
     const args = getArgs(pending!);
 
     expect(args.requestId).toBe(computeRequestId(sampleEvmParams).slice(2));
-    expect(args.amount).toBe("100000000");
+    expect(parseFloat(args.amount as string)).toBe(100000000);
     expect(args.erc20Address).toBe(damlEvmParams.erc20Address);
     expect(args.requester).toBe(depositor);
   }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
-// Cross-runtime withdrawal lifecycle: optimistic debit + PendingWithdrawal.
+// Cross-runtime withdrawal lifecycle
 // ---------------------------------------------------------------------------
 describe("cross-runtime withdrawal lifecycle", () => {
   it("withdrawal debits balance and creates PendingWithdrawal with correct requestId", async () => {
@@ -210,7 +209,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
         operator,
         owner: depositor,
         erc20Address: damlEvmParams.erc20Address,
-        amount: "500000000",
+        amount: "500000000.0",
       },
     );
     const balCid = firstCreatedCid(balResult);
@@ -225,7 +224,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
         requester: depositor,
         balanceCid: balCid,
         recipientAddress: "d8da6bf26964af9d7eed9e03e53415d37aa96045",
-        withdrawAmount: "200000000",
+        withdrawAmount: "200000000.0",
         evmParams: damlEvmParams,
       },
     );
@@ -238,6 +237,6 @@ describe("cross-runtime withdrawal lifecycle", () => {
 
     const newBal = findCreated(withdrawResult, "UserErc20Balance");
     expect(newBal).toBeDefined();
-    expect(getArgs(newBal!).amount).toBe("300000000");
+    expect(parseFloat(getArgs(newBal!).amount as string)).toBe(300000000);
   }, 30_000);
 });

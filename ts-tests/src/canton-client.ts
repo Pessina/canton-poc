@@ -29,8 +29,23 @@ export async function allocateParty(hint: string): Promise<string> {
       userId: "",
     },
   });
-  if (error) throw new Error(`allocateParty failed: ${JSON.stringify(error)}`);
+  if (error) {
+    const msg = JSON.stringify(error);
+    if (msg.includes("Party already exists")) {
+      const existing = await findPartyByHint(hint);
+      if (existing) return existing;
+    }
+    throw new Error(`allocateParty failed: ${msg}`);
+  }
   return data!.partyDetails!.party!;
+}
+
+async function findPartyByHint(hint: string): Promise<string | undefined> {
+  const { data } = await client.GET("/v2/parties");
+  const match = data?.partyDetails?.find((p) =>
+    p.party?.startsWith(`${hint}::`),
+  );
+  return match?.party ?? undefined;
 }
 
 export async function createUser(
@@ -54,7 +69,11 @@ export async function createUser(
       rights,
     } as components["schemas"]["CreateUserRequest"],
   });
-  if (error) throw new Error(`createUser failed: ${JSON.stringify(error)}`);
+  if (error) {
+    const msg = JSON.stringify(error);
+    if (msg.includes("USER_ALREADY_EXISTS")) return;
+    throw new Error(`createUser failed: ${msg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +91,7 @@ export async function uploadDar(darPath: string): Promise<void> {
   if (!res.ok) {
     const text = await res.text();
     if (text.includes("KNOWN_PACKAGE_VERSION")) return;
+    if (text.includes("NOT_VALID_UPGRADE_PACKAGE")) return;
     throw new Error(`Upload DAR failed: ${res.status} ${text}`);
   }
 }
@@ -125,4 +145,39 @@ export async function exerciseChoice(
   return submitAndWait(userId, actAs, [
     { ExerciseCommand: { templateId, contractId, choice, choiceArgument } },
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// Ledger state & updates
+// ---------------------------------------------------------------------------
+
+export type JsGetUpdatesResponse =
+  components["schemas"]["JsGetUpdatesResponse"];
+
+export async function getLedgerEnd(): Promise<number> {
+  const { data, error } = await client.GET("/v2/state/ledger-end");
+  if (error) throw new Error(`getLedgerEnd failed: ${JSON.stringify(error)}`);
+  return data!.offset;
+}
+
+export async function getUpdates(
+  beginExclusive: number,
+  parties: string[],
+  idleTimeoutMs = 2000,
+): Promise<JsGetUpdatesResponse[]> {
+  const filtersByParty: Record<string, components["schemas"]["Filters"]> = {};
+  for (const party of parties) {
+    filtersByParty[party] = {};
+  }
+
+  const { data, error } = await client.POST("/v2/updates", {
+    params: { query: { stream_idle_timeout_ms: idleTimeoutMs } },
+    body: {
+      beginExclusive,
+      verbose: true,
+      filter: { filtersByParty },
+    },
+  });
+  if (error) throw new Error(`getUpdates failed: ${JSON.stringify(error)}`);
+  return data!;
 }
