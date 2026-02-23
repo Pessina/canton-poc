@@ -8,8 +8,8 @@
  *   npm run deposit -- Operator::1220abc... Depositor::1220def... 00xyz... mpc-observer
  */
 
-import { exerciseChoice } from "./canton-client.js";
-import { VaultOrchestrator } from "../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+import { exerciseChoice } from "../infra/canton-client.js";
+import { VaultOrchestrator } from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 

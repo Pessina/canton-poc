@@ -16,13 +16,13 @@ import {
   createUser,
   createContract,
   getLedgerEnd,
-  getUpdates,
   type JsGetUpdatesResponse,
-} from "./canton-client.js";
-import { VaultOrchestrator } from "../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+} from "../infra/canton-client.js";
+import { createLedgerStream } from "../infra/ledger-stream.js";
+import { VaultOrchestrator } from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DAR_PATH = resolve(__dirname, "../../.daml/dist/canton-mpc-poc-0.2.0.dar");
+const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.2.0.dar");
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const TEST_PUB_KEY =
@@ -96,21 +96,17 @@ function processBatch(updates: JsGetUpdatesResponse[]): number | undefined {
 async function main() {
   const { operator } = await setup();
 
-  let offset = await getLedgerEnd();
+  const offset = await getLedgerEnd();
   console.log(`Watching for PendingDeposit events from offset ${offset}...`);
 
-  while (true) {
-    try {
-      const updates = await getUpdates(offset, [operator]);
-      const newOffset = processBatch(updates);
-      if (newOffset != null) {
-        offset = newOffset;
-      }
-    } catch (err) {
-      console.error("Poll error:", err);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
+  createLedgerStream({
+    parties: [operator],
+    beginExclusive: offset,
+    onUpdate: (item) => {
+      processBatch([item]);
+    },
+    onError: (err) => console.error("Stream error:", err),
+  });
 }
 
 main().catch((err) => {

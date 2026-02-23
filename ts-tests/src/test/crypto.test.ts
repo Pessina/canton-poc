@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { computeRequestId, type EvmTransactionParams } from "./crypto.js";
+import { computeRequestId, type EvmTransactionParams } from "../mpc/crypto.js";
 import {
   allocateParty,
   createUser,
@@ -11,11 +11,11 @@ import {
   type TransactionResponse,
   type Event,
   type CreatedEvent,
-} from "./canton-client.js";
+} from "../infra/canton-client.js";
 import {
   VaultOrchestrator,
   UserErc20Balance,
-} from "../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+} from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -102,7 +102,7 @@ const ADMIN_USER = `admin-${RUN_ID}`;
 beforeAll(async () => {
   const darPath = resolve(
     __dirname,
-    "../../.daml/dist/canton-mpc-poc-0.2.0.dar",
+    "../../../.daml/dist/canton-mpc-poc-0.2.0.dar",
   );
   await uploadDar(darPath);
 
@@ -136,7 +136,7 @@ describe("cross-runtime request_id", () => {
       {
         requester: depositor,
         erc20Address: damlEvmParams.erc20Address,
-        amount: "100000000.0",
+        amount: "100000000",
         evmParams: damlEvmParams,
       },
     );
@@ -172,7 +172,7 @@ describe("cross-runtime deposit lifecycle", () => {
       {
         requester: depositor,
         erc20Address: damlEvmParams.erc20Address,
-        amount: "100000000.0",
+        amount: "100000000",
         evmParams: damlEvmParams,
       },
     );
@@ -209,7 +209,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
         operator,
         owner: depositor,
         erc20Address: damlEvmParams.erc20Address,
-        amount: "500000000.0",
+        amount: "500000000",
       },
     );
     const balCid = firstCreatedCid(balResult);
@@ -224,7 +224,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
         requester: depositor,
         balanceCid: balCid,
         recipientAddress: "d8da6bf26964af9d7eed9e03e53415d37aa96045",
-        withdrawAmount: "200000000.0",
+        withdrawAmount: "200000000",
         evmParams: damlEvmParams,
       },
     );

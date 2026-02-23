@@ -5,12 +5,13 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "observe": "tsx src/mpc-observer.ts",
-    "deposit": "tsx src/trigger-deposit.ts",
-    "demo": "tsx src/demo.ts"
+    "observe": "tsx src/mpc/observer.ts",
+    "deposit": "tsx src/scripts/trigger-deposit.ts",
+    "demo": "tsx src/scripts/demo.ts"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
+    "@types/ws": "^8.18.1",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
@@ -21,6 +22,7 @@
     "@daml/types": "^3.4.11",
     "@mojotech/json-type-validation": "^3.1.0",
     "openapi-fetch": "^0.17.0",
-    "viem": "^2.23.0"
+    "viem": "^2.23.0",
+    "ws": "^8.19.0"
   }
 }

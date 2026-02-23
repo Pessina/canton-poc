@@ -4,9 +4,9 @@
  */
 
 import createClient from "openapi-fetch";
-import type { paths, components } from "../generated/api/ledger-api.js";
+import type { paths, components } from "../../generated/api/ledger-api.js";
 
-const BASE_URL = "http://localhost:7575";
+export const BASE_URL = "http://localhost:7575";
 
 export const client = createClient<paths>({ baseUrl: BASE_URL });
 

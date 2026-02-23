@@ -15,11 +15,14 @@ import {
   exerciseChoice,
   getLedgerEnd,
   getUpdates,
-} from "./canton-client.js";
-import { VaultOrchestrator } from "../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+} from "../infra/canton-client.js";
+import { VaultOrchestrator } from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DAR_PATH = resolve(__dirname, "../../.daml/dist/canton-mpc-poc-0.2.0.dar");
+const DAR_PATH = resolve(
+  __dirname,
+  "../../../.daml/dist/canton-mpc-poc-0.2.0.dar",
+);
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 
 const TEST_PUB_KEY =
@@ -31,8 +34,10 @@ const damlEvmParams = {
   amount: "0000000000000000000000000000000000000000000000000000000005f5e100",
   nonce: "0000000000000000000000000000000000000000000000000000000000000001",
   gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas: "0000000000000000000000000000000000000000000000000000000ba43b7400",
-  maxPriorityFee: "0000000000000000000000000000000000000000000000000000000077359400",
+  maxFeePerGas:
+    "0000000000000000000000000000000000000000000000000000000ba43b7400",
+  maxPriorityFee:
+    "0000000000000000000000000000000000000000000000000000000077359400",
   chainId: "0000000000000000000000000000000000000000000000000000000000000001",
   value: "0000000000000000000000000000000000000000000000000000000000000000",
   operation: "Erc20Transfer",

@@ -2,6 +2,8 @@
 
 This guide covers running the canton-mpc-poc project using the DPM in-memory sandbox. This is the recommended path for contract development, testing, and initial MPC integration work.
 
+The Ledger API (gRPC and JSON) exposed by the sandbox uses the same protocol as a production Canton participant. Your off-chain service code (MPC node, TypeScript tests) will work against both without changes to the core integration logic. See [PROD_SETUP.md](./PROD_SETUP.md) for what changes when moving to a multi-node or production deployment.
+
 ---
 
 ## Architecture (Sandbox Mode)
@@ -28,29 +30,41 @@ This guide covers running the canton-mpc-poc project using the DPM in-memory san
 
 ### What the sandbox provides
 
-| Component | Description |
-|-----------|-------------|
-| **Sequencer** | Orders all messages (runs in-process, no exposed port) |
-| **Mediator** | Aggregates validation responses (runs in-process, no exposed port) |
-| **Participant** | Hosts all parties, runs contracts, exposes Ledger APIs |
-| **JSON Ledger API** | REST + WebSocket interface at `http://localhost:7575` |
-| **gRPC Ledger API** | Streaming interface at `localhost:6865` |
+| Component           | Description                                                        |
+| ------------------- | ------------------------------------------------------------------ |
+| **Sequencer**       | Orders all messages (runs in-process, no exposed port)             |
+| **Mediator**        | Aggregates validation responses (runs in-process, no exposed port) |
+| **Participant**     | Hosts all parties, runs contracts, exposes Ledger APIs             |
+| **JSON Ledger API** | REST + WebSocket interface at `http://localhost:7575`              |
+| **gRPC Ledger API** | Streaming interface at `localhost:6865`                            |
 
 In sandbox mode all Canton components run in a single JVM process with in-memory storage. Data is lost on restart.
+
+### What the sandbox does NOT cover
+
+The sandbox runs a single participant with all parties co-hosted. This means:
+
+- No multi-participant transaction visibility — every party sees everything
+- No JWT authentication required on API calls
+- No TLS on gRPC/HTTP connections
+- No real consensus latency (sequencer/mediator are in-process)
+- No network failure scenarios (everything is localhost, in-process)
+
+These concerns are covered in [PROD_SETUP.md](./PROD_SETUP.md).
 
 ---
 
 ## Hardhat Equivalence
 
-| Hardhat | Canton |
-|---------|--------|
-| `npx hardhat compile` | `dpm build` |
-| `npx hardhat test` | `dpm test` |
-| `npx hardhat node` | `dpm sandbox` |
+| Hardhat                 | Canton                                                                                                                                                            |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx hardhat compile`   | `dpm build`                                                                                                                                                       |
+| `npx hardhat test`      | `dpm test`                                                                                                                                                        |
+| `npx hardhat node`      | `dpm sandbox`                                                                                                                                                     |
 | `hardhat run deploy.js` | `curl -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` |
-| ethers.js / web3.js | gRPC via `tonic` (Rust) or JSON Ledger API v2 via `fetch`/`reqwest` |
-| Hardhat console | Canton Console (`./bin/canton -c config/...`) — not needed for sandbox |
-| `hardhat.config.js` | `daml.yaml` |
+| ethers.js / web3.js     | gRPC via `tonic` (Rust) or JSON Ledger API v2 via `fetch`/`reqwest`                                                                                               |
+| Hardhat console         | Canton Console (`./bin/canton -c config/...`) — not needed for sandbox                                                                                            |
+| `hardhat.config.js`     | `daml.yaml`                                                                                                                                                       |
 
 > **Note:** SDK 3.4 uses `dpm` (Digital Asset Package Manager) — the old `daml` CLI is deprecated.
 
@@ -58,19 +72,19 @@ In sandbox mode all Canton components run in a single JVM process with in-memory
 
 ## Prerequisites
 
-### 1. Install JDK 17+
+### 1. Install JDK 21
 
-Canton runs on the JVM. You need JDK 17 or higher.
+Canton 3.4.x is built and tested against Java 21 (all [GitHub releases](https://github.com/digital-asset/canton/releases) report `OpenJDK 21.0.5`).
 
 ```bash
 # macOS (Homebrew)
-brew install openjdk@17
+brew install openjdk@21
 
 # Set JAVA_HOME (add to ~/.zshrc for persistence)
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 
 # Verify
-java -version   # Must be 17+
+java -version   # Should be 21+
 echo $JAVA_HOME
 ```
 
@@ -133,6 +147,7 @@ dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar
 ```
 
 This starts a full Canton node with:
+
 - JSON Ledger API at `http://localhost:7575`
 - gRPC Ledger API at `localhost:6865`
 
@@ -290,24 +305,24 @@ curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transactio
 
 ## Contract Templates
 
-| Template | Module | Description |
-|----------|--------|-------------|
-| `VaultOrchestrator` | `Erc20Vault` | Drives the deposit/withdraw state machine |
-| `PendingDeposit` | `Erc20Vault` | Deposit waiting for MPC confirmation |
-| `PendingWithdrawal` | `Erc20Vault` | Withdrawal waiting for MPC execution |
-| `UserErc20Balance` | `Holding` | Per-user ERC-20 balance (CIP-56 Holding) |
-| `VaultTransferFactory` | `Transfer` | CIP-56 TransferFactory for transfers |
-| `VaultTransferInstruction` | `Transfer` | CIP-56 TransferInstruction (accept/reject/withdraw) |
+| Template                   | Module       | Description                                         |
+| -------------------------- | ------------ | --------------------------------------------------- |
+| `VaultOrchestrator`        | `Erc20Vault` | Drives the deposit/withdraw state machine           |
+| `PendingDeposit`           | `Erc20Vault` | Deposit waiting for MPC confirmation                |
+| `PendingWithdrawal`        | `Erc20Vault` | Withdrawal waiting for MPC execution                |
+| `UserErc20Balance`         | `Holding`    | Per-user ERC-20 balance (CIP-56 Holding)            |
+| `VaultTransferFactory`     | `Transfer`   | CIP-56 TransferFactory for transfers                |
+| `VaultTransferInstruction` | `Transfer`   | CIP-56 TransferInstruction (accept/reject/withdraw) |
 
 ### Choice Map
 
-| Template | Choice | Type | Controller | Returns |
-|----------|--------|------|------------|---------|
-| `VaultOrchestrator` | `RequestDeposit` | nonconsuming | operator, requester | `ContractId PendingDeposit` |
-| `VaultOrchestrator` | `ClaimDeposit` | nonconsuming | operator | `ContractId UserErc20Balance` |
-| `VaultOrchestrator` | `RequestWithdrawal` | nonconsuming | operator, requester | `(Optional (ContractId UserErc20Balance), ContractId PendingWithdrawal)` |
-| `VaultOrchestrator` | `CompleteWithdrawal` | nonconsuming | operator | `Optional (ContractId UserErc20Balance)` |
-| `VaultOrchestrator` | `ExecuteTransfer` | nonconsuming | operator, sender | `TransferInstructionResult` |
+| Template            | Choice               | Type         | Controller          | Returns                                                                  |
+| ------------------- | -------------------- | ------------ | ------------------- | ------------------------------------------------------------------------ |
+| `VaultOrchestrator` | `RequestDeposit`     | nonconsuming | operator, requester | `ContractId PendingDeposit`                                              |
+| `VaultOrchestrator` | `ClaimDeposit`       | nonconsuming | operator            | `ContractId UserErc20Balance`                                            |
+| `VaultOrchestrator` | `RequestWithdrawal`  | nonconsuming | operator, requester | `(Optional (ContractId UserErc20Balance), ContractId PendingWithdrawal)` |
+| `VaultOrchestrator` | `CompleteWithdrawal` | nonconsuming | operator            | `Optional (ContractId UserErc20Balance)`                                 |
+| `VaultOrchestrator` | `ExecuteTransfer`    | nonconsuming | operator, sender    | `TransferInstructionResult`                                              |
 
 ---
 
@@ -317,10 +332,10 @@ The Rust MPC node connects to the Participant's gRPC Ledger API only. It never t
 
 ### Endpoints
 
-| API | Endpoint | Use |
-|-----|----------|-----|
-| **gRPC Ledger API** | `localhost:6865` | Primary — streaming events + command submission |
-| **JSON Ledger API** | `http://localhost:7575` | REST + WebSocket alternative |
+| API                 | Endpoint                | Use                                             |
+| ------------------- | ----------------------- | ----------------------------------------------- |
+| **gRPC Ledger API** | `localhost:6865`        | Primary — streaming events + command submission |
+| **JSON Ledger API** | `http://localhost:7575` | REST + WebSocket alternative                    |
 
 ### MPC Node Flow
 
@@ -401,18 +416,18 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 
 ## Useful Commands
 
-| Command | Purpose |
-|---------|---------|
-| `dpm build` | Compile Daml to .dar |
-| `dpm test` | Run all Daml Script tests |
-| `dpm test --test-pattern "testName"` | Run a specific test |
-| `dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar` | Start sandbox with DAR |
-| `curl http://localhost:7575/health` | Health check (HTTP 200 = ready) |
-| `curl -s -X POST http://localhost:7575/v2/parties -H "Content-Type: application/json" -d '{"partyIdHint":"Alice","identityProviderId":""}'` | Allocate a party |
-| `curl -s -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` | Upload DAR (if not loaded at startup) |
-| `curl http://localhost:7575/docs/openapi` | OpenAPI spec (YAML) |
-| `curl http://localhost:7575/docs/asyncapi` | AsyncAPI spec (WebSocket) |
-| `dpm daml script --dar .daml/dist/canton-mpc-poc-0.2.0.dar --script-name Test:test5_depositLifecycle --ledger-host localhost --ledger-port 6865` | Run a Daml Script against live sandbox |
+| Command                                                                                                                                                              | Purpose                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `dpm build`                                                                                                                                                          | Compile Daml to .dar                   |
+| `dpm test`                                                                                                                                                           | Run all Daml Script tests              |
+| `dpm test --test-pattern "testName"`                                                                                                                                 | Run a specific test                    |
+| `dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar`                                                                                         | Start sandbox with DAR                 |
+| `curl http://localhost:7575/health`                                                                                                                                  | Health check (HTTP 200 = ready)        |
+| `curl -s -X POST http://localhost:7575/v2/parties -H "Content-Type: application/json" -d '{"partyIdHint":"Alice","identityProviderId":""}'`                          | Allocate a party                       |
+| `curl -s -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` | Upload DAR (if not loaded at startup)  |
+| `curl http://localhost:7575/docs/openapi`                                                                                                                            | OpenAPI spec (YAML)                    |
+| `curl http://localhost:7575/docs/asyncapi`                                                                                                                           | AsyncAPI spec (WebSocket)              |
+| `dpm daml script --dar .daml/dist/canton-mpc-poc-0.2.0.dar --script-name Test:test5_depositLifecycle --ledger-host localhost --ledger-port 6865`                     | Run a Daml Script against live sandbox |
 
 ---
 
@@ -425,8 +440,8 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 java -version
 
 # If not installed (macOS)
-brew install openjdk@17
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+brew install openjdk@21
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 ```
 
 ### Port Already in Use
@@ -453,6 +468,7 @@ The DAR is already uploaded. Safe to ignore — this is idempotent behavior.
 ### Party Not Found
 
 Party IDs include a namespace suffix. Always use the full ID returned from `/v2/parties`:
+
 - Correct: `Operator::122034ab...5678`
 - Wrong: `Operator`
 
@@ -475,6 +491,7 @@ Party IDs include a namespace suffix. Always use the full ID returned from `/v2/
 - [DPM CLI](https://docs.digitalasset.com/build/3.4/dpm/dpm.html)
 - [Canton Releases](https://github.com/digital-asset/canton/releases)
 - [gRPC Ledger API Reference](https://docs.digitalasset.com/build/3.4/reference/lapi-proto-docs.html)
+- [gRPC Ledger API Services](https://docs.digitalasset.com/build/3.5/explanations/ledger-api-services.html)
 - [JSON Ledger API](https://docs.digitalasset.com/build/3.4/explanations/json-api/index.html)
 - [JWT Authentication](https://docs.digitalasset.com/operate/3.4/howtos/secure/apis/jwt.html)
-- [CN-Quickstart (full Docker stack)](https://github.com/digital-asset/cn-quickstart)
+- [Production Setup Guide](./PROD_SETUP.md)
