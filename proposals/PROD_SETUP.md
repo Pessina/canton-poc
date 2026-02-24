@@ -24,10 +24,10 @@ Your MPC node's core loop — subscribe to `PendingDeposit`/`PendingWithdrawal`,
 
 | Concern | Sandbox | Production | Impact on MPC Node |
 |---------|---------|------------|-------------------|
-| **Transaction visibility** | Single participant sees all events for all parties | Each participant only sees events for parties it hosts | MPC node must connect to the participant hosting Operator. It won't see Depositor-only events unless Operator is a stakeholder on the contract. |
+| **Transaction visibility** | Single participant sees all events for all parties | Each participant only sees events for parties it hosts | MPC node must connect to the participant hosting Issuer. It won't see Depositor-only events unless Issuer is a stakeholder on the contract. |
 | **Authentication** | No JWT required (unsecured) | JWT required on every gRPC and JSON API call | You need a JWT token provider in the Rust client. This is a real code change. |
 | **TLS** | Plaintext localhost | TLS required on all connections | `tonic` TLS config with CA certs, client certs if mTLS. |
-| **Multi-controller choices** | Both parties on same participant — single `actAs` list works | Parties on separate participants — Canton's confirmation protocol handles cross-participant authorization | `ClaimDeposit` (controller: operator only) works fine. `RequestDeposit` (controller: operator + requester) needs cross-participant `actAs` grants or delegation. |
+| **Multi-controller choices** | Both parties on same participant — single `actAs` list works | Parties on separate participants — Canton's confirmation protocol handles cross-participant authorization | `ClaimDeposit` (controller: issuer only) works fine. `RequestDeposit` (controller: issuer + requester) needs cross-participant `actAs` grants or delegation. |
 | **Offset semantics** | Simple, monotonic | Causal within a synchronizer, but not globally ordered across synchronizers | Minimal impact for single-synchronizer setups, but crash recovery should not assume global offset ordering. |
 | **Network reliability** | Localhost, never fails | gRPC connections drop, need reconnect/retry | Exponential backoff, stream reconnection, idempotent command submission. |
 | **Latency** | Near-instant (in-process sequencer/mediator) | Real consensus rounds (tens of ms) | Timeouts and polling intervals need realistic values. |
@@ -112,7 +112,7 @@ canton-open-source-3.4.11/
 │ JSON  :5013  │  │ JSON  :5023  │
 │ Admin :5012  │  │ Admin :5022  │
 │              │  │              │
-│ → Operator   │  │ → Depositor  │
+│ → Issuer     │  │ → Depositor  │
 └──────┬───────┘  └──────┬───────┘
        │                 │
  ┌─────┴──────┐   ┌──────┴─────┐
@@ -195,14 +195,14 @@ utils.retry_until_true {
 }
 
 // Allocate parties on separate participants
-val operator = participant1.parties.enable("Operator")
+val issuer = participant1.parties.enable("Issuer")
 val depositor = participant2.parties.enable("Depositor")
 
 // Upload the DAR to both participants
 participants.all.dars.upload(".daml/dist/canton-mpc-poc-0.2.0.dar")
 
 // Print party IDs for use in API calls
-println(s"Operator:  ${operator.toLf}")
+println(s"Issuer:  ${issuer.toLf}")
 println(s"Depositor: ${depositor.toLf}")
 ```
 
@@ -233,7 +233,7 @@ To run as a background daemon instead:
 ### Step 4: Wait for Readiness
 
 ```bash
-# Participant 1 (Operator)
+# Participant 1 (Issuer)
 curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:5013/health
 
 # Participant 2 (Depositor)
@@ -245,19 +245,19 @@ curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:5023/health
 Each participant gets its own user, scoped to its hosted party:
 
 ```bash
-# Operator user on Participant 1
+# Issuer user on Participant 1
 curl -s -X POST http://localhost:5013/v2/users \
   -H "Content-Type: application/json" \
   -d '{
     "user": {
-      "id": "operator-user",
-      "primaryParty": "Operator::1220...",
+      "id": "issuer-user",
+      "primaryParty": "Issuer::1220...",
       "isDeactivated": false,
       "identityProviderId": ""
     },
     "rights": [
-      {"kind": {"CanActAs": {"value": {"party": "Operator::1220..."}}}},
-      {"kind": {"CanReadAs": {"value": {"party": "Operator::1220..."}}}}
+      {"kind": {"CanActAs": {"value": {"party": "Issuer::1220..."}}}},
+      {"kind": {"CanReadAs": {"value": {"party": "Issuer::1220..."}}}}
     ]
   }'
 
@@ -282,12 +282,12 @@ curl -s -X POST http://localhost:5023/v2/users \
 
 In the sandbox, a single user has `actAs` for all parties. In multi-node, parties live on separate participants.
 
-For choices like `RequestDeposit` (controller: operator + requester), grant cross-participant rights via Canton Console:
+For choices like `RequestDeposit` (controller: issuer + requester), grant cross-participant rights via Canton Console:
 
 ```scala
-// Grant operator-user on participant1 the ability to act as Depositor
+// Grant issuer-user on participant1 the ability to act as Depositor
 participant1.ledger_api.users.rights.grant(
-  id = "operator-user",
+  id = "issuer-user",
   actAs = Set(depositor),
   readAs = Set(depositor),
 )
@@ -314,14 +314,14 @@ curl -s -X POST http://localhost:5013/v2/commands/submit-and-wait-for-transactio
         }
       ],
       "commandId": "deposit-request-001",
-      "userId": "operator-user",
-      "actAs": ["Operator::1220...", "Depositor::1220..."],
-      "readAs": ["Operator::1220...", "Depositor::1220..."]
+      "userId": "issuer-user",
+      "actAs": ["Issuer::1220...", "Depositor::1220..."],
+      "readAs": ["Issuer::1220...", "Depositor::1220..."]
     }
   }'
 ```
 
-For single-controller choices (`ClaimDeposit`, `CompleteWithdrawal` — controller: operator only), no cross-participant grants are needed. The MPC node submits directly to Participant 1.
+For single-controller choices (`ClaimDeposit`, `CompleteWithdrawal` — controller: issuer only), no cross-participant grants are needed. The MPC node submits directly to Participant 1.
 
 ---
 
@@ -330,7 +330,7 @@ For single-controller choices (`ClaimDeposit`, `CompleteWithdrawal` — controll
 | API | Endpoint | Use |
 |-----|----------|-----|
 | **gRPC Ledger API (Participant 1)** | `localhost:5011` | MPC node streaming + commands |
-| **JSON Ledger API (Participant 1)** | `http://localhost:5013` | REST alternative for Operator actions |
+| **JSON Ledger API (Participant 1)** | `http://localhost:5013` | REST alternative for Issuer actions |
 | **JSON Ledger API (Participant 2)** | `http://localhost:5023` | REST for Depositor-scoped queries |
 
 Update the MPC node config to target port `5011` instead of `6865`.
@@ -474,7 +474,7 @@ let client = CommandServiceClient::with_interceptor(channel, move |mut req: Requ
 });
 ```
 
-JWT tokens encode the `actAs` and `readAs` parties. The token must grant rights for the parties the MPC node acts as (Operator).
+JWT tokens encode the `actAs` and `readAs` parties. The token must grant rights for the parties the MPC node acts as (Issuer).
 
 > **Reference:** [JWT Authentication](https://docs.digitalasset.com/operate/3.4/howtos/secure/apis/jwt.html)
 
@@ -556,17 +556,17 @@ if !response.status().is_success() {
 
 In the sandbox, a single participant sees all events. In production:
 
-- **Participant 1** (hosting Operator) sees events where Operator is a stakeholder
+- **Participant 1** (hosting Issuer) sees events where Issuer is a stakeholder
 - **Participant 2** (hosting Depositor) sees events where Depositor is a stakeholder
-- A contract with both Operator and Depositor as signatories/observers is visible to both
+- A contract with both Issuer and Depositor as signatories/observers is visible to both
 
 For the MPC node, this means:
-- `VaultOrchestrator` (signatory: operator) — visible on Participant 1
-- `PendingDeposit` (signatory: operator, observer: requester) — visible on Participant 1
-- `PendingWithdrawal` (signatory: operator, observer: requester) — visible on Participant 1
-- `UserErc20Balance` (signatory: operator, observer: owner) — visible on Participant 1
+- `VaultOrchestrator` (signatory: issuer) — visible on Participant 1
+- `PendingDeposit` (signatory: issuer, observer: requester) — visible on Participant 1
+- `PendingWithdrawal` (signatory: issuer, observer: requester) — visible on Participant 1
+- `Erc20Holding` (signatory: issuer, observer: owner) — visible on Participant 1
 
-Since the MPC node acts as Operator and all contracts have Operator as signatory, the MPC node will see all relevant events on Participant 1. No visibility issues for this specific contract design.
+Since the MPC node acts as Issuer and all contracts have Issuer as signatory, the MPC node will see all relevant events on Participant 1. No visibility issues for this specific contract design.
 
 ### Offset Semantics
 

@@ -1,3 +1,6 @@
+-- | Naming conventions follow Daml Finance / CIP-56 Canton Token Standard:
+--   "issuer"       = the party that issues/manages the instrument
+--   "Erc20Holding" = a holding (asset ownership) contract per CIP-56
 module Erc20Vault where
 
 import DA.Crypto.Text (BytesHex, PublicKeyHex)
@@ -5,35 +8,35 @@ import DA.Crypto.Text (BytesHex, PublicKeyHex)
 import Types (EvmTransactionParams, MpcSignature(..))
 import Crypto (computeRequestId, computeResponseHash, verifyMpcSignature)
 
--- | Per-user ERC-20 balance tracked on Canton.
--- Represents a holding of a wrapped token on a foreign chain.
-template UserErc20Balance
+-- | ERC-20 holding on Canton (per CIP-56 Canton Token Standard).
+-- Represents a user's ownership of a wrapped ERC-20 token on a foreign chain.
+template Erc20Holding
   with
-    operator     : Party
+    issuer       : Party  -- "issuer" per Daml Finance: the party that issues/manages the instrument
     owner        : Party
     erc20Address : BytesHex
     amount       : Decimal
   where
-    signatory operator
+    signatory issuer
     observer owner
 
 -- | A deposit that is waiting for MPC confirmation.
 template PendingDeposit
   with
-    operator     : Party
+    issuer       : Party
     requester    : Party
     erc20Address : BytesHex
     amount       : Decimal
     requestId    : BytesHex
     evmParams    : EvmTransactionParams
   where
-    signatory operator
+    signatory issuer
     observer requester
 
 -- | A withdrawal that is waiting for MPC execution result.
 template PendingWithdrawal
   with
-    operator         : Party
+    issuer           : Party
     requester        : Party
     erc20Address     : BytesHex
     amount           : Decimal
@@ -41,16 +44,16 @@ template PendingWithdrawal
     requestId        : BytesHex
     evmParams        : EvmTransactionParams
   where
-    signatory operator
+    signatory issuer
     observer requester
 
 -- | Orchestrator contract that drives the deposit/withdraw state machine.
 template VaultOrchestrator
   with
-    operator     : Party
+    issuer       : Party
     mpcPublicKey : PublicKeyHex
   where
-    signatory operator
+    signatory issuer
 
     nonconsuming choice RequestDeposit : ContractId PendingDeposit
       with
@@ -58,24 +61,24 @@ template VaultOrchestrator
         erc20Address : BytesHex
         amount       : Decimal
         evmParams    : EvmTransactionParams
-      controller operator, requester
+      controller issuer, requester
       do
         let requestId = computeRequestId evmParams
 
         create PendingDeposit with
-          operator
+          issuer
           requester
           erc20Address
           amount
           requestId
           evmParams
 
-    nonconsuming choice ClaimDeposit : ContractId UserErc20Balance
+    nonconsuming choice ClaimDeposit : ContractId Erc20Holding
       with
         pendingCid   : ContractId PendingDeposit
         mpcSignature : MpcSignature
         mpcOutput    : BytesHex
-      controller operator
+      controller issuer
       do
         pending <- fetch pendingCid
         archive pendingCid
@@ -88,20 +91,20 @@ template VaultOrchestrator
         assertMsg "Invalid MPC signature on deposit response"
           (verifyMpcSignature mpcSignature responseHash)
 
-        create UserErc20Balance with
-          operator
+        create Erc20Holding with
+          issuer
           owner = pending.requester
           erc20Address = pending.erc20Address
           amount = pending.amount
 
-    nonconsuming choice RequestWithdrawal : (ContractId UserErc20Balance, ContractId PendingWithdrawal)
+    nonconsuming choice RequestWithdrawal : (ContractId Erc20Holding, ContractId PendingWithdrawal)
       with
         requester        : Party
-        balanceCid       : ContractId UserErc20Balance
+        balanceCid       : ContractId Erc20Holding
         recipientAddress : BytesHex
         withdrawAmount   : Decimal
         evmParams        : EvmTransactionParams
-      controller operator, requester
+      controller issuer, requester
       do
         bal <- fetch balanceCid
         archive balanceCid
@@ -113,7 +116,7 @@ template VaultOrchestrator
         newBalCid <- create bal with amount = bal.amount - withdrawAmount
 
         pendingCid <- create PendingWithdrawal with
-          operator
+          issuer
           requester = bal.owner
           erc20Address = bal.erc20Address
           amount = withdrawAmount
@@ -123,13 +126,13 @@ template VaultOrchestrator
 
         pure (newBalCid, pendingCid)
 
-    nonconsuming choice CompleteWithdrawal : Optional (ContractId UserErc20Balance)
+    nonconsuming choice CompleteWithdrawal : Optional (ContractId Erc20Holding)
       with
         pendingCid   : ContractId PendingWithdrawal
-        balanceCid   : ContractId UserErc20Balance
+        balanceCid   : ContractId Erc20Holding
         mpcSignature : MpcSignature
         mpcOutput    : BytesHex
-      controller operator
+      controller issuer
       do
         pending <- fetch pendingCid
         archive pendingCid

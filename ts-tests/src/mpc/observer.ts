@@ -34,18 +34,18 @@ async function setup() {
   await uploadDar(DAR_PATH);
   console.log("Uploaded DAR");
 
-  const operator = await allocateParty("Operator");
+  const issuer = await allocateParty("Issuer");
   const depositor = await allocateParty("Depositor");
-  console.log(`Operator: ${operator}`);
+  console.log(`Issuer: ${issuer}`);
   console.log(`Depositor: ${depositor}`);
 
-  await createUser(USER_ID, operator, [depositor]);
+  await createUser(USER_ID, issuer, [depositor]);
 
   const orchResult = await createContract(
     USER_ID,
-    [operator],
+    [issuer],
     VAULT_ORCHESTRATOR,
-    { operator, mpcPublicKey: TEST_PUB_KEY },
+    { issuer, mpcPublicKey: TEST_PUB_KEY },
   );
 
   const firstEvent = orchResult.transaction.events![0];
@@ -57,7 +57,7 @@ async function setup() {
 
   console.log(`Orchestrator CID: ${orchCid}`);
 
-  return { operator, depositor, orchCid };
+  return { issuer, depositor, orchCid };
 }
 
 function processBatch(updates: JsGetUpdatesResponse[]): number | undefined {
@@ -94,13 +94,13 @@ function processBatch(updates: JsGetUpdatesResponse[]): number | undefined {
 }
 
 async function main() {
-  const { operator } = await setup();
+  const { issuer } = await setup();
 
   const offset = await getLedgerEnd();
   console.log(`Watching for PendingDeposit events from offset ${offset}...`);
 
   createLedgerStream({
-    parties: [operator],
+    parties: [issuer],
     beginExclusive: offset,
     onUpdate: (item) => {
       processBatch([item]);

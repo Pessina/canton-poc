@@ -165,11 +165,11 @@ curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:7575/health
 Party IDs include a namespace suffix (`::1220...`). Save the full IDs from the responses — you need them for all subsequent API calls.
 
 ```bash
-# Allocate the Operator party
+# Allocate the Issuer party
 curl -s -X POST http://localhost:7575/v2/parties \
   -H "Content-Type: application/json" \
-  -d '{"partyIdHint": "Operator", "identityProviderId": ""}'
-# Response: {"partyDetails":{"party":"Operator::1220abcd...","isLocal":true,...}}
+  -d '{"partyIdHint": "Issuer", "identityProviderId": ""}'
+# Response: {"partyDetails":{"party":"Issuer::1220abcd...","isLocal":true,...}}
 
 # Allocate the Depositor party
 curl -s -X POST http://localhost:7575/v2/parties \
@@ -188,20 +188,20 @@ curl -s -X POST http://localhost:7575/v2/users \
   -d '{
     "user": {
       "id": "admin-user",
-      "primaryParty": "Operator::1220...",
+      "primaryParty": "Issuer::1220...",
       "isDeactivated": false,
       "identityProviderId": ""
     },
     "rights": [
-      {"kind": {"CanActAs": {"value": {"party": "Operator::1220..."}}}},
-      {"kind": {"CanReadAs": {"value": {"party": "Operator::1220..."}}}},
+      {"kind": {"CanActAs": {"value": {"party": "Issuer::1220..."}}}},
+      {"kind": {"CanReadAs": {"value": {"party": "Issuer::1220..."}}}},
       {"kind": {"CanActAs": {"value": {"party": "Depositor::1220..."}}}},
       {"kind": {"CanReadAs": {"value": {"party": "Depositor::1220..."}}}}
     ]
   }'
 ```
 
-Replace `Operator::1220...` and `Depositor::1220...` with the actual full party IDs from Step 4.
+Replace `Issuer::1220...` and `Depositor::1220...` with the actual full party IDs from Step 4.
 
 ### Step 6: Create the VaultOrchestrator Contract
 
@@ -215,7 +215,7 @@ curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transactio
           "CreateCommand": {
             "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
             "createArguments": {
-              "operator": "Operator::1220...",
+              "issuer": "Issuer::1220...",
               "mpcPublicKey": "3056301006072a8648ce3d020106052b8104000a034200049b51a3db8f697ac5e49078b01af8d2721dd9a39b81c59bae57d13e5c5d4c915649441be47149b0293b28d8b4a92416045bb39f922329f197fdeed3320c0746a5"
             }
           }
@@ -223,8 +223,8 @@ curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transactio
       ],
       "commandId": "create-orchestrator-001",
       "userId": "admin-user",
-      "actAs": ["Operator::1220..."],
-      "readAs": ["Operator::1220..."]
+      "actAs": ["Issuer::1220..."],
+      "readAs": ["Issuer::1220..."]
     }
   }'
 ```
@@ -243,7 +243,7 @@ curl -s -X POST http://localhost:7575/v2/state/active-contracts \
   -d '{
     "filter": {
       "filtersByParty": {
-        "Operator::1220...": {
+        "Issuer::1220...": {
           "cumulative": {
             "templateFilters": [
               {
@@ -293,13 +293,13 @@ curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transactio
       ],
       "commandId": "deposit-request-001",
       "userId": "admin-user",
-      "actAs": ["Operator::1220...", "Depositor::1220..."],
-      "readAs": ["Operator::1220...", "Depositor::1220..."]
+      "actAs": ["Issuer::1220...", "Depositor::1220..."],
+      "readAs": ["Issuer::1220...", "Depositor::1220..."]
     }
   }'
 ```
 
-> **Multi-controller note:** `RequestDeposit` requires `controller operator, requester` — both parties must be in `actAs`.
+> **Multi-controller note:** `RequestDeposit` requires `controller issuer, requester` — both parties must be in `actAs`.
 
 ---
 
@@ -310,7 +310,7 @@ curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transactio
 | `VaultOrchestrator`        | `Erc20Vault` | Drives the deposit/withdraw state machine           |
 | `PendingDeposit`           | `Erc20Vault` | Deposit waiting for MPC confirmation                |
 | `PendingWithdrawal`        | `Erc20Vault` | Withdrawal waiting for MPC execution                |
-| `UserErc20Balance`         | `Holding`    | Per-user ERC-20 balance (CIP-56 Holding)            |
+| `Erc20Holding`         | `Holding`    | Per-user ERC-20 balance (CIP-56 Holding)            |
 | `VaultTransferFactory`     | `Transfer`   | CIP-56 TransferFactory for transfers                |
 | `VaultTransferInstruction` | `Transfer`   | CIP-56 TransferInstruction (accept/reject/withdraw) |
 
@@ -318,11 +318,11 @@ curl -s -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transactio
 
 | Template            | Choice               | Type         | Controller          | Returns                                                                  |
 | ------------------- | -------------------- | ------------ | ------------------- | ------------------------------------------------------------------------ |
-| `VaultOrchestrator` | `RequestDeposit`     | nonconsuming | operator, requester | `ContractId PendingDeposit`                                              |
-| `VaultOrchestrator` | `ClaimDeposit`       | nonconsuming | operator            | `ContractId UserErc20Balance`                                            |
-| `VaultOrchestrator` | `RequestWithdrawal`  | nonconsuming | operator, requester | `(Optional (ContractId UserErc20Balance), ContractId PendingWithdrawal)` |
-| `VaultOrchestrator` | `CompleteWithdrawal` | nonconsuming | operator            | `Optional (ContractId UserErc20Balance)`                                 |
-| `VaultOrchestrator` | `ExecuteTransfer`    | nonconsuming | operator, sender    | `TransferInstructionResult`                                              |
+| `VaultOrchestrator` | `RequestDeposit`     | nonconsuming | issuer, requester | `ContractId PendingDeposit`                                              |
+| `VaultOrchestrator` | `ClaimDeposit`       | nonconsuming | issuer            | `ContractId Erc20Holding`                                            |
+| `VaultOrchestrator` | `RequestWithdrawal`  | nonconsuming | issuer, requester | `(Optional (ContractId Erc20Holding), ContractId PendingWithdrawal)` |
+| `VaultOrchestrator` | `CompleteWithdrawal` | nonconsuming | issuer            | `Optional (ContractId Erc20Holding)`                                 |
+| `VaultOrchestrator` | `ExecuteTransfer`    | nonconsuming | issuer, sender    | `TransferInstructionResult`                                              |
 
 ---
 
@@ -409,7 +409,7 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 - After changing Daml templates, you must `dpm build` and restart the sandbox
 - Party IDs change on each sandbox restart (they include a unique namespace hash)
 - `vetAllPackages=true` is required when uploading DARs to make templates available
-- Always use the full party ID (`Operator::1220...`), never just `Operator`
+- Always use the full party ID (`Issuer::1220...`), never just `Issuer`
 - Command submission has double nesting: outer `commands` object wraps inner `commands` array
 
 ---
@@ -469,8 +469,8 @@ The DAR is already uploaded. Safe to ignore — this is idempotent behavior.
 
 Party IDs include a namespace suffix. Always use the full ID returned from `/v2/parties`:
 
-- Correct: `Operator::122034ab...5678`
-- Wrong: `Operator`
+- Correct: `Issuer::122034ab...5678`
+- Wrong: `Issuer`
 
 ### Command Fails with INVALID_ARGUMENT
 

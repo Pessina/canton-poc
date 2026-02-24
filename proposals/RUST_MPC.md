@@ -4,7 +4,7 @@
 
 The Rust MPC node is an off-chain service that bridges the Canton ledger with EVM-compatible blockchains. It watches for `PendingDeposit` and `PendingWithdrawal` contract events on a Canton participant via the gRPC Ledger API, then performs MPC signing operations and EVM interactions to complete the deposit/withdrawal lifecycle.
 
-The node does not participate in Canton consensus. It connects exclusively to the Participant's Ledger API -- never to the sequencer or mediator. From Canton's perspective it is an automation bot that reads events and submits commands as the `operator` party.
+The node does not participate in Canton consensus. It connects exclusively to the Participant's Ledger API -- never to the sequencer or mediator. From Canton's perspective it is an automation bot that reads events and submits commands as the `issuer` party.
 
 **Responsibilities:**
 
@@ -372,7 +372,7 @@ When a `PendingDeposit` contract is created on the ledger, the MPC node must ver
 ```haskell
 template PendingDeposit
   with
-    operator     : Party
+    issuer     : Party
     requester    : Party
     erc20Address : BytesHex      -- ERC-20 token contract address
     amount       : Decimal        -- expected deposit amount
@@ -505,7 +505,7 @@ async fn exercise_claim_deposit(
     mpc_signature: &MpcSignatureBytes,
     mpc_output: &str,    // hex-encoded tx hash
     user_id: &str,
-    operator_party: &str,
+    issuer_party: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = CommandServiceClient::new(channel);
 
@@ -571,8 +571,8 @@ async fn exercise_claim_deposit(
             commands: vec![command],
             command_id: format!("claim-deposit-{}", uuid::Uuid::new_v4()),
             user_id: user_id.to_string(),
-            act_as: vec![operator_party.to_string()],
-            read_as: vec![operator_party.to_string()],
+            act_as: vec![issuer_party.to_string()],
+            read_as: vec![issuer_party.to_string()],
             ..Default::default()
         }),
     };
@@ -594,7 +594,7 @@ When a `PendingWithdrawal` contract is created, the MPC node must build an EVM t
 ```haskell
 template PendingWithdrawal
   with
-    operator         : Party
+    issuer         : Party
     requester        : Party
     erc20Address     : BytesHex
     amount           : Decimal
@@ -719,7 +719,7 @@ async fn exercise_complete_withdrawal(
     mpc_signature: &MpcSignatureBytes,
     mpc_output: &str,    // hex-encoded tx hash (success) or empty (failure)
     user_id: &str,
-    operator_party: &str,
+    issuer_party: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = CommandServiceClient::new(channel);
 
@@ -791,8 +791,8 @@ async fn exercise_complete_withdrawal(
             commands: vec![command],
             command_id: format!("complete-withdrawal-{}", uuid::Uuid::new_v4()),
             user_id: user_id.to_string(),
-            act_as: vec![operator_party.to_string()],
-            read_as: vec![operator_party.to_string()],
+            act_as: vec![issuer_party.to_string()],
+            read_as: vec![issuer_party.to_string()],
             ..Default::default()
         }),
     };
@@ -808,7 +808,7 @@ async fn exercise_complete_withdrawal(
 The Daml `CompleteWithdrawal` choice has a built-in refund mechanism:
 
 - If `verifyMpcSignature` succeeds: the withdrawal is finalized, returns `None`
-- If `verifyMpcSignature` fails: the pending amount is refunded to the user's `UserErc20Balance`, returns `Some refundCid`
+- If `verifyMpcSignature` fails: the pending amount is refunded to the user's `Erc20Holding`, returns `Some refundCid`
 
 This means if the MPC node submits an invalid signature (e.g., due to a broadcast failure where the node signs over an error output), the user's balance is automatically restored on-ledger.
 
@@ -857,7 +857,7 @@ async fn run(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
         None => {
             tracing::info!("no persisted offset, loading full active contract set");
             let (active_events, offset) = load_active_contracts(
-                channel.clone(), &config.operator_party
+                channel.clone(), &config.issuer_party
             ).await?;
 
             // Process any existing pending contracts
@@ -871,7 +871,7 @@ async fn run(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Subscribe from the resolved offset
-    subscribe_events(channel, &config.operator_party, begin_offset).await
+    subscribe_events(channel, &config.issuer_party, begin_offset).await
 }
 ```
 

@@ -2,10 +2,10 @@
  * Trigger a deposit request against a running VaultOrchestrator.
  *
  * Usage:
- *   npm run deposit -- <operator> <depositor> <orchestratorCid> <userId>
+ *   npm run deposit -- <issuer> <depositor> <orchestratorCid> <userId>
  *
  * Example:
- *   npm run deposit -- Operator::1220abc... Depositor::1220def... 00xyz... mpc-observer
+ *   npm run deposit -- Issuer::1220abc... Depositor::1220def... 00xyz... mpc-observer
  */
 
 import { exerciseChoice } from "../infra/canton-client.js";
@@ -34,11 +34,11 @@ const damlEvmParams = {
 };
 
 async function main() {
-  const [operator, depositor, orchCid, userId] = process.argv.slice(2);
+  const [issuer, depositor, orchCid, userId] = process.argv.slice(2);
 
-  if (!operator || !depositor || !orchCid || !userId) {
+  if (!issuer || !depositor || !orchCid || !userId) {
     console.error(
-      "Usage: npm run deposit -- <operator> <depositor> <orchestratorCid> <userId>",
+      "Usage: npm run deposit -- <issuer> <depositor> <orchestratorCid> <userId>",
     );
     process.exit(1);
   }
@@ -47,7 +47,7 @@ async function main() {
 
   const result = await exerciseChoice(
     userId,
-    [operator, depositor],
+    [issuer, depositor],
     VAULT_ORCHESTRATOR,
     orchCid,
     "RequestDeposit",

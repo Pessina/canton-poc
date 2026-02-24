@@ -14,13 +14,13 @@ import {
 } from "../infra/canton-client.js";
 import {
   VaultOrchestrator,
-  UserErc20Balance,
+  Erc20Holding,
 } from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
-const USER_BALANCE = UserErc20Balance.templateId;
+const USER_BALANCE = Erc20Holding.templateId;
 
 function getCreatedEvent(event: Event): CreatedEvent | undefined {
   if ("CreatedEvent" in event) return event.CreatedEvent;
@@ -94,7 +94,7 @@ const TEST_PUB_KEY =
 // ---------------------------------------------------------------------------
 // Setup: upload DAR, allocate parties, create user
 // ---------------------------------------------------------------------------
-let operator: string;
+let issuer: string;
 let depositor: string;
 const RUN_ID = Math.random().toString(36).slice(2, 8);
 const ADMIN_USER = `admin-${RUN_ID}`;
@@ -106,10 +106,10 @@ beforeAll(async () => {
   );
   await uploadDar(darPath);
 
-  operator = await allocateParty(`Operator_${RUN_ID}`);
+  issuer = await allocateParty(`Issuer_${RUN_ID}`);
   depositor = await allocateParty(`Depositor_${RUN_ID}`);
 
-  await createUser(ADMIN_USER, operator, [depositor]);
+  await createUser(ADMIN_USER, issuer, [depositor]);
 }, 30_000);
 
 // ---------------------------------------------------------------------------
@@ -121,15 +121,15 @@ describe("cross-runtime request_id", () => {
 
     const orchResult = await createContract(
       ADMIN_USER,
-      [operator],
+      [issuer],
       VAULT_ORCHESTRATOR,
-      { operator, mpcPublicKey: TEST_PUB_KEY },
+      { issuer, mpcPublicKey: TEST_PUB_KEY },
     );
     const orchCid = firstCreatedCid(orchResult);
 
     const depositResult = await exerciseChoice(
       ADMIN_USER,
-      [operator, depositor],
+      [issuer, depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestDeposit",
@@ -157,15 +157,15 @@ describe("cross-runtime deposit lifecycle", () => {
   it("deposit creates PendingDeposit with matching requestId", async () => {
     const orchResult = await createContract(
       ADMIN_USER,
-      [operator],
+      [issuer],
       VAULT_ORCHESTRATOR,
-      { operator, mpcPublicKey: TEST_PUB_KEY },
+      { issuer, mpcPublicKey: TEST_PUB_KEY },
     );
     const orchCid = firstCreatedCid(orchResult);
 
     const depositResult = await exerciseChoice(
       ADMIN_USER,
-      [operator, depositor],
+      [issuer, depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestDeposit",
@@ -195,18 +195,18 @@ describe("cross-runtime withdrawal lifecycle", () => {
   it("withdrawal debits balance and creates PendingWithdrawal with correct requestId", async () => {
     const orchResult = await createContract(
       ADMIN_USER,
-      [operator],
+      [issuer],
       VAULT_ORCHESTRATOR,
-      { operator, mpcPublicKey: TEST_PUB_KEY },
+      { issuer, mpcPublicKey: TEST_PUB_KEY },
     );
     const orchCid = firstCreatedCid(orchResult);
 
     const balResult = await createContract(
       ADMIN_USER,
-      [operator],
+      [issuer],
       USER_BALANCE,
       {
-        operator,
+        issuer,
         owner: depositor,
         erc20Address: damlEvmParams.erc20Address,
         amount: "500000000",
@@ -216,7 +216,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
 
     const withdrawResult = await exerciseChoice(
       ADMIN_USER,
-      [operator, depositor],
+      [issuer, depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestWithdrawal",
@@ -235,7 +235,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
       computeRequestId(sampleEvmParams).slice(2),
     );
 
-    const newBal = findCreated(withdrawResult, "UserErc20Balance");
+    const newBal = findCreated(withdrawResult, "Erc20Holding");
     expect(newBal).toBeDefined();
     expect(parseFloat(getArgs(newBal!).amount as string)).toBe(300000000);
   }, 30_000);

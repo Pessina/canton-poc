@@ -51,18 +51,18 @@ async function main() {
   await uploadDar(DAR_PATH);
   console.log("Uploaded DAR");
 
-  const operator = await allocateParty("Operator");
+  const issuer = await allocateParty("Issuer");
   const depositor = await allocateParty("Depositor");
-  console.log(`Operator:  ${operator}`);
+  console.log(`Issuer:  ${issuer}`);
   console.log(`Depositor: ${depositor}`);
 
-  await createUser(USER_ID, operator, [depositor]);
+  await createUser(USER_ID, issuer, [depositor]);
 
   const orchResult = await createContract(
     USER_ID,
-    [operator],
+    [issuer],
     VAULT_ORCHESTRATOR,
-    { operator, mpcPublicKey: TEST_PUB_KEY },
+    { issuer, mpcPublicKey: TEST_PUB_KEY },
   );
   const firstEvent = orchResult.transaction.events![0];
   const orchCid =
@@ -79,7 +79,7 @@ async function main() {
   // 3. Fire RequestDeposit
   const result = await exerciseChoice(
     USER_ID,
-    [operator, depositor],
+    [issuer, depositor],
     VAULT_ORCHESTRATOR,
     orchCid,
     "RequestDeposit",
@@ -98,7 +98,7 @@ async function main() {
   const deadline = Date.now() + 10_000;
 
   while (Date.now() < deadline) {
-    const updates = await getUpdates(offset, [operator]);
+    const updates = await getUpdates(offset, [issuer]);
     for (const item of updates) {
       const update = item.update;
       if (!("Transaction" in update)) continue;

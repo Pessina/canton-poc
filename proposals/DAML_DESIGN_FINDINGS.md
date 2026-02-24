@@ -31,7 +31,7 @@ A user's balance is the **sum of their active holding contracts**, computed off-
 
 ### Contract Keys and UTXO
 
-In a UTXO model, multiple `UserErc20Balance` contracts can exist for the same `(operator, owner, erc20Address)` tuple. This means holdings are **intentionally keyless** — a contract key enforces uniqueness, which contradicts UTXO semantics.
+In a UTXO model, multiple `Erc20Holding` contracts can exist for the same `(issuer, owner, erc20Address)` tuple. This means holdings are **intentionally keyless** — a contract key enforces uniqueness, which contradicts UTXO semantics.
 
 Contract keys are appropriate for singleton contracts like `VaultOrchestrator` or `PendingDeposit` (where deduplication by `requestId` is useful), but not for balance holdings.
 
@@ -79,14 +79,14 @@ The orchestrator **exercises choices on holdings**, not the other way around.
 
 The controller of Split/Merge/Transfer is a critical design decision that depends on the template's signatory structure.
 
-**Current state:** `UserErc20Balance` has `signatory operator` and `observer owner`. The owner has read-only visibility — no authority to exercise consuming choices.
+**Current state:** `Erc20Holding` has `signatory issuer` and `observer owner`. The owner has read-only visibility — no authority to exercise consuming choices.
 
-**Option 1: Operator-controlled choices** (preserves current auth model)
+**Option 1: Issuer-controlled choices** (preserves current auth model)
 
 ```daml
-choice Split : (ContractId UserErc20Balance, ContractId UserErc20Balance)
+choice Split : (ContractId Erc20Holding, ContractId Erc20Holding)
   with splitAmount : Int
-  controller operator
+  controller issuer
   do
     assertMsg "Split amount must be positive" (splitAmount > 0)
     assertMsg "Split amount must be less than total" (splitAmount < amount)
@@ -97,20 +97,20 @@ choice Split : (ContractId UserErc20Balance, ContractId UserErc20Balance)
 
 Pros: No signatory changes. Cons: User cannot self-serve UTXO management.
 
-**Option 2: Co-signed choices** (operator + owner must both authorize)
+**Option 2: Co-signed choices** (issuer + owner must both authorize)
 
 ```daml
-choice Split : (ContractId UserErc20Balance, ContractId UserErc20Balance)
+choice Split : (ContractId Erc20Holding, ContractId Erc20Holding)
   with splitAmount : Int
-  controller operator, owner
+  controller issuer, owner
   do ...
 ```
 
-Pros: User has agency. Cons: Requires multi-party submission (`submit (actAs operator <> actAs owner) do ...`).
+Pros: User has agency. Cons: Requires multi-party submission (`submit (actAs issuer <> actAs owner) do ...`).
 
 **Option 3: Delegation pattern** (recommended for production)
 
-Owner pre-authorizes specific operations via a delegation contract. The operator can then act on holdings within the delegated scope without requiring the owner to co-sign each time. See [Section 5](#5-delegation-pattern-design) for the full design.
+Owner pre-authorizes specific operations via a delegation contract. The issuer can then act on holdings within the delegated scope without requiring the owner to co-sign each time. See [Section 5](#5-delegation-pattern-design) for the full design.
 
 ### Key Design Patterns
 
@@ -128,9 +128,9 @@ Owner pre-authorizes specific operations via a delegation contract. The operator
 
 | Concern | Current Location | Idiomatic Location |
 |---|---|---|
-| Split / Merge | Missing entirely | `UserErc20Balance` (operator or co-signed) |
-| Transfer | Missing entirely | `UserErc20Balance` (via Transferable) |
-| Balance invariant | No `ensure` clause | `ensure amount > 0` on `UserErc20Balance` |
+| Split / Merge | Missing entirely | `Erc20Holding` (issuer or co-signed) |
+| Transfer | Missing entirely | `Erc20Holding` (via Transferable) |
+| Balance invariant | No `ensure` clause | `ensure amount > 0` on `Erc20Holding` |
 | Deposit workflow | `VaultOrchestrator` | `VaultOrchestrator` (correct) |
 | Withdrawal workflow | `VaultOrchestrator` | `VaultOrchestrator` (correct) |
 | MPC verification | `VaultOrchestrator` | `VaultOrchestrator` (correct) |
@@ -138,11 +138,11 @@ Owner pre-authorizes specific operations via a delegation contract. The operator
 
 ### Gaps to Address
 
-1. **Add `ensure amount > 0` to `UserErc20Balance`** — prevents zero or negative holdings from being created by buggy Split/Merge implementations. This is a defensive invariant that the ledger enforces at contract creation time.
+1. **Add `ensure amount > 0` to `Erc20Holding`** — prevents zero or negative holdings from being created by buggy Split/Merge implementations. This is a defensive invariant that the ledger enforces at contract creation time.
 
-2. **Add `Split` and `Merge` choices to `UserErc20Balance`** — enables UTXO management. Controller must be decided (see Section 2 authorization model).
+2. **Add `Split` and `Merge` choices to `Erc20Holding`** — enables UTXO management. Controller must be decided (see Section 2 authorization model).
 
-3. **Add `Transfer` choice to `UserErc20Balance`** — enables peer-to-peer transfers. For a proper Transfer, the new owner needs to become an observer on the created contract, and account-level controllers (if introduced) should gate incoming transfers.
+3. **Add `Transfer` choice to `Erc20Holding`** — enables peer-to-peer transfers. For a proper Transfer, the new owner needs to become an observer on the created contract, and account-level controllers (if introduced) should gate incoming transfers.
 
 4. **Multi-UTXO withdrawal** — `RequestWithdrawal` currently takes a single `balanceCid`; a user with [4, 10, 6] can't withdraw 15 without first merging. See [Section 6](#6-multi-utxo-withdrawal-design) for proposed solutions.
 
@@ -182,18 +182,18 @@ interface Fungible where
   merge : ContractId Fungible -> Update (ContractId Fungible)
 
 -- 2. Your template implements it
-template UserErc20Balance
+template Erc20Holding
   with
-    operator     : Party
+    issuer     : Party
     owner        : Party
     erc20Address : BytesHex
     amount       : Int
   where
-    signatory operator
+    signatory issuer
     observer owner
     ensure amount > 0
 
-    interface instance Fungible for UserErc20Balance where
+    interface instance Fungible for Erc20Holding where
       view = FungibleView with
         owner
         amount
@@ -206,7 +206,7 @@ template UserErc20Balance
         cid2 <- create this with amount = amount - splitAmount
         pure (toInterfaceContractId cid1, toInterfaceContractId cid2)
       merge otherCid = do
-        other <- fetch (fromInterfaceContractId @UserErc20Balance otherCid)
+        other <- fetch (fromInterfaceContractId @Erc20Holding otherCid)
         archive otherCid
         cid <- create this with amount = amount + other.amount
         pure (toInterfaceContractId cid)
@@ -228,7 +228,7 @@ When a template implements an interface, the interface's methods become exercisa
 - Interface choices are exercised via `exercise (toInterfaceContractId @Fungible cid) (Split 50)` where the submitting party must have the required authorization
 - The signatory/observer rules of the template still apply — the submitting party must satisfy the authorization check
 
-For our `UserErc20Balance` where `signatory operator`, only the operator (or parties authorized via delegation) can exercise consuming choices.
+For our `Erc20Holding` where `signatory issuer`, only the issuer (or parties authorized via delegation) can exercise consuming choices.
 
 ### Two Paths for Standard Compliance
 
@@ -263,7 +263,7 @@ The Daml Finance library defines interfaces in `Daml.Finance.Interface.Holding.V
 
 #### Option C: Define Your Own Interfaces (Current Pragmatic Path)
 
-Define minimal `Fungible` and `Transferable` interfaces in your own project. Your `UserErc20Balance` implements them. No external dependencies needed.
+Define minimal `Fungible` and `Transferable` interfaces in your own project. Your `Erc20Holding` implements them. No external dependencies needed.
 
 **Pros:**
 - Zero dependency overhead — works with your current `daml.yaml`
@@ -293,9 +293,9 @@ Define minimal `Fungible` and `Transferable` interfaces in your own project. You
 Given SDK 3.4.11 and the current scope (MPC vault PoC):
 
 1. **Start with Option C** — define minimal `Fungible` and `Transferable` interfaces in-project
-2. **Have `UserErc20Balance` implement them** — gains Split, Merge, Transfer choices
+2. **Have `Erc20Holding` implement them** — gains Split, Merge, Transfer choices
 3. **Add `ensure amount > 0`** — defensive invariant on all holdings
-4. **Use operator-controlled choices for the PoC** — simplest auth model, no signatory changes needed
+4. **Use issuer-controlled choices for the PoC** — simplest auth model, no signatory changes needed
 5. **Keep `VaultOrchestrator` as the workflow layer** — it exercises choices on holdings
 6. **When moving to production**, migrate to CIP-56 (`Splice.Api.Token.HoldingV1`) for Canton Network interop, and switch to delegation-based authorization
 
@@ -303,28 +303,28 @@ Given SDK 3.4.11 and the current scope (MPC vault PoC):
 
 ## 5. Delegation Pattern Design
 
-The delegation pattern allows the operator to exercise choices on holdings without requiring the owner to co-sign every operation. The owner creates a one-time delegation contract granting specific rights.
+The delegation pattern allows the issuer to exercise choices on holdings without requiring the owner to co-sign every operation. The owner creates a one-time delegation contract granting specific rights.
 
 ### MergeDelegation
 
-Allows the operator (or a wallet provider) to consolidate a user's UTXOs in the background:
+Allows the issuer (or a wallet provider) to consolidate a user's UTXOs in the background:
 
 ```daml
 template MergeDelegation
   with
-    operator     : Party
+    issuer     : Party
     owner        : Party
     erc20Address : BytesHex
   where
-    signatory operator, owner
+    signatory issuer, owner
     -- Both must sign creation (via propose-accept or multi-party submit).
     -- This ensures the owner explicitly consents to delegation.
 
-    nonconsuming choice ExecuteMerge : ContractId UserErc20Balance
+    nonconsuming choice ExecuteMerge : ContractId Erc20Holding
       with
-        holdingCids : [ContractId UserErc20Balance]
-      controller operator
-      -- Only operator can trigger, but owner's authority is
+        holdingCids : [ContractId Erc20Holding]
+      controller issuer
+      -- Only issuer can trigger, but owner's authority is
       -- inherited from the delegation contract's signatories.
       do
         assertMsg "Need at least 2 holdings to merge" (length holdingCids >= 2)
@@ -338,8 +338,8 @@ template MergeDelegation
         -- Archive all inputs
         mapA_ archive holdingCids
         -- Create consolidated output
-        create UserErc20Balance with
-          operator
+        create Erc20Holding with
+          issuer
           owner
           erc20Address
           amount = totalAmount
@@ -353,16 +353,16 @@ template MergeDelegation
 
 ### Creating Delegation via Propose-Accept
 
-Since the owner is not currently a signatory on `UserErc20Balance`, we need a propose-accept pattern for creating the `MergeDelegation` (which requires both signatories):
+Since the owner is not currently a signatory on `Erc20Holding`, we need a propose-accept pattern for creating the `MergeDelegation` (which requires both signatories):
 
 ```daml
 template MergeDelegationProposal
   with
-    operator     : Party
+    issuer     : Party
     owner        : Party
     erc20Address : BytesHex
   where
-    signatory operator
+    signatory issuer
     observer owner
 
     choice AcceptDelegation : ContractId MergeDelegation
@@ -371,41 +371,41 @@ template MergeDelegationProposal
         create MergeDelegation with ..
 
     choice WithdrawProposal : ()
-      controller operator
+      controller issuer
       do pure ()
 ```
 
-Workflow: Operator creates `MergeDelegationProposal` -> Owner exercises `AcceptDelegation` -> `MergeDelegation` is created with both signatories.
+Workflow: Issuer creates `MergeDelegationProposal` -> Owner exercises `AcceptDelegation` -> `MergeDelegation` is created with both signatories.
 
 ### Testing Delegation
 
 ```daml
 testMergeDelegation : Script ()
 testMergeDelegation = do
-  operator <- allocateParty "Operator"
+  issuer <- allocateParty "Issuer"
   owner <- allocateParty "Owner"
   let erc20Addr = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
 
   -- Create multiple small holdings
-  cid1 <- submit operator do
-    createCmd UserErc20Balance with
-      operator; owner; erc20Address = erc20Addr; amount = 100
-  cid2 <- submit operator do
-    createCmd UserErc20Balance with
-      operator; owner; erc20Address = erc20Addr; amount = 250
-  cid3 <- submit operator do
-    createCmd UserErc20Balance with
-      operator; owner; erc20Address = erc20Addr; amount = 50
+  cid1 <- submit issuer do
+    createCmd Erc20Holding with
+      issuer; owner; erc20Address = erc20Addr; amount = 100
+  cid2 <- submit issuer do
+    createCmd Erc20Holding with
+      issuer; owner; erc20Address = erc20Addr; amount = 250
+  cid3 <- submit issuer do
+    createCmd Erc20Holding with
+      issuer; owner; erc20Address = erc20Addr; amount = 50
 
   -- Create delegation via propose-accept
-  proposalCid <- submit operator do
+  proposalCid <- submit issuer do
     createCmd MergeDelegationProposal with
-      operator; owner; erc20Address = erc20Addr
+      issuer; owner; erc20Address = erc20Addr
   delegationCid <- submit owner do
     exerciseCmd proposalCid AcceptDelegation
 
-  -- Operator merges all 3 holdings into 1
-  mergedCid <- submit operator do
+  -- Issuer merges all 3 holdings into 1
+  mergedCid <- submit issuer do
     exerciseCmd delegationCid ExecuteMerge with
       holdingCids = [cid1, cid2, cid3]
 
@@ -429,7 +429,7 @@ User explicitly merges holdings first, then withdraws from the merged holding. T
 
 ```
 Client-side:
-1. Query all UserErc20Balance for (owner, erc20Address)
+1. Query all Erc20Holding for (owner, erc20Address)
 2. Select holdings that sum to >= withdrawAmount
 3. If multiple selected, exercise Merge to consolidate
 4. Exercise RequestWithdrawal with the single merged holding
@@ -443,14 +443,14 @@ Client-side:
 Modify `RequestWithdrawal` to accept a list of holding contract IDs:
 
 ```daml
-nonconsuming choice RequestWithdrawal : (ContractId UserErc20Balance, ContractId PendingWithdrawal)
+nonconsuming choice RequestWithdrawal : (ContractId Erc20Holding, ContractId PendingWithdrawal)
   with
     requester        : Party
-    balanceCids      : [ContractId UserErc20Balance]  -- multiple inputs
+    balanceCids      : [ContractId Erc20Holding]  -- multiple inputs
     recipientAddress : BytesHex
     withdrawAmount   : Int
     evmParams        : EvmTransactionParams
-  controller operator, requester
+  controller issuer, requester
   do
     assertMsg "Must provide at least one holding" (not (null balanceCids))
     -- Fetch and archive all inputs
@@ -470,14 +470,14 @@ nonconsuming choice RequestWithdrawal : (ContractId UserErc20Balance, ContractId
     let changeAmount = totalAvailable - withdrawAmount
 
     -- Create change output if needed
-    newBalCid <- create UserErc20Balance with
-      operator
+    newBalCid <- create Erc20Holding with
+      issuer
       owner = requester
       erc20Address = erc20Addr
       amount = changeAmount
 
     pendingCid <- create PendingWithdrawal with
-      operator
+      issuer
       requester
       erc20Address = erc20Addr
       amount = withdrawAmount
@@ -489,7 +489,7 @@ nonconsuming choice RequestWithdrawal : (ContractId UserErc20Balance, ContractId
 ```
 
 **Pros:** Single atomic transaction. No separate merge step.
-**Cons:** More complex choice. The `ensure amount > 0` on `UserErc20Balance` will reject creation if `changeAmount == 0`, so the choice needs to handle the exact-amount case (skip creating change output or return `Optional (ContractId UserErc20Balance)`).
+**Cons:** More complex choice. The `ensure amount > 0` on `Erc20Holding` will reject creation if `changeAmount == 0`, so the choice needs to handle the exact-amount case (skip creating change output or return `Optional (ContractId Erc20Holding)`).
 
 ### Recommendation
 

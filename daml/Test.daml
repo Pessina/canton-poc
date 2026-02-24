@@ -104,15 +104,15 @@ test4_hexPacking = do
 
 test5_depositLifecycle : Script ()
 test5_depositLifecycle = do
-  operator  <- allocateParty "Operator"
+  issuer  <- allocateParty "Issuer"
   depositor <- allocateParty "Depositor"
 
-  orchCid <- submit operator do
+  orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      operator
+      issuer
       mpcPublicKey = testPubKeyHex
 
-  pendingCid <- submit (actAs operator <> actAs depositor) do
+  pendingCid <- submit (actAs issuer <> actAs depositor) do
     exerciseCmd orchCid RequestDeposit with
       requester    = depositor
       erc20Address = sampleEvmParams.erc20Address
@@ -140,22 +140,22 @@ test5_depositLifecycle = do
 
 test6_withdrawalLifecycle : Script ()
 test6_withdrawalLifecycle = do
-  operator <- allocateParty "Operator"
+  issuer <- allocateParty "Issuer"
   user     <- allocateParty "User"
 
-  orchCid <- submit operator do
+  orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      operator
+      issuer
       mpcPublicKey = testPubKeyHex
 
-  balCid <- submit operator do
-    createCmd UserErc20Balance with
-      operator
+  balCid <- submit issuer do
+    createCmd Erc20Holding with
+      issuer
       owner        = user
       erc20Address = sampleEvmParams.erc20Address
       amount       = 500_000_000.0
 
-  (newBalCid, pendingCid) <- submit (actAs operator <> actAs user) do
+  (newBalCid, pendingCid) <- submit (actAs issuer <> actAs user) do
     exerciseCmd orchCid RequestWithdrawal with
       requester        = user
       balanceCid       = balCid
@@ -171,7 +171,7 @@ test6_withdrawalLifecycle = do
         signature = testSignatureHex
         publicKey = testPubKeyHex
 
-  refundResult <- submit operator do
+  refundResult <- submit issuer do
     exerciseCmd orchCid CompleteWithdrawal with
       pendingCid
       balanceCid   = newBalCid
