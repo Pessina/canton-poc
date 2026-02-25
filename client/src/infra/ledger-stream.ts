@@ -9,11 +9,7 @@
  */
 
 import WebSocket from "ws";
-import {
-  BASE_URL,
-  getUpdates,
-  type JsGetUpdatesResponse,
-} from "./canton-client.js";
+import { BASE_URL, getUpdates, type JsGetUpdatesResponse } from "./canton-client.js";
 
 export interface LedgerStreamOptions {
   /** Base URL of the Canton JSON Ledger API (e.g. "http://localhost:7575") */
@@ -89,15 +85,13 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
       console.warn(
         `WebSocket reconnection exhausted after ${maxAttempts} attempts. Falling back to HTTP polling.`,
       );
-      startPolling();
+      void startPolling();
       return;
     }
 
     const delay = Math.min(1000 * 2 ** reconnectAttempt, maxDelay);
     reconnectAttempt++;
-    console.log(
-      `Reconnecting in ${delay}ms (attempt ${reconnectAttempt}/${maxAttempts})...`,
-    );
+    console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempt}/${maxAttempts})...`);
     reconnectTimer = setTimeout(connect, delay);
   }
 
@@ -120,20 +114,27 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
       );
     });
 
-    ws.on("message", (data) => {
+    ws.on("message", (data: WebSocket.RawData) => {
       try {
-        const parsed: JsGetUpdatesResponse = JSON.parse(data.toString());
+        const text = Buffer.isBuffer(data)
+          ? data.toString("utf-8")
+          : Array.isArray(data)
+            ? Buffer.concat(data).toString("utf-8")
+            : new TextDecoder().decode(data);
+        const parsed = JSON.parse(text) as JsGetUpdatesResponse;
 
         if ("error" in parsed) {
-          opts.onError?.(
-            new Error(`Ledger stream error: ${JSON.stringify(parsed.error)}`),
-          );
+          opts.onError?.(new Error(`Ledger stream error: ${JSON.stringify(parsed.error)}`));
           return;
         }
 
         handleUpdate(parsed);
       } catch (err) {
-        opts.onError?.(new Error(`Failed to parse WebSocket message: ${err}`));
+        opts.onError?.(
+          new Error(
+            `Failed to parse WebSocket message: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
       }
     });
 
@@ -157,11 +158,7 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
 
     while (!closed) {
       try {
-        const updates = await getUpdates(
-          currentOffset,
-          opts.parties,
-          pollingIdleTimeoutMs,
-        );
+        const updates = await getUpdates(currentOffset, opts.parties, pollingIdleTimeoutMs);
         for (const item of updates) {
           if (closed) break;
           handleUpdate(item);

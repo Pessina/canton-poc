@@ -424,12 +424,12 @@ dpm test
 dpm sandbox --json-api-port 7575 --dar .daml/dist/my-project-0.1.0.dar
 
 # 4. Generate TypeScript types (while sandbox is running)
-curl http://localhost:7575/docs/openapi -o ts-tests/openapi.yaml
-npx openapi-typescript ts-tests/openapi.yaml -o ts-tests/generated/api/ledger-api.ts
-dpm codegen-js .daml/dist/my-project-0.1.0.dar -o ts-tests/generated/model -s daml.js
+curl http://localhost:7575/docs/openapi -o client/openapi.yaml
+npx openapi-typescript client/openapi.yaml -o client/generated/api/ledger-api.ts
+dpm codegen-js .daml/dist/my-project-0.1.0.dar -o client/generated/model -s daml.js
 
 # 5. Run TypeScript tests
-cd ts-tests && npm test
+cd client && npm test
 
 # 6. When changing Daml contracts:
 #    - Stop sandbox (Ctrl+C)

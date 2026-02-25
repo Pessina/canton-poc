@@ -40,7 +40,9 @@ function findCreated(res: TransactionResponse, templateFragment: string) {
 }
 
 function firstCreatedCid(res: TransactionResponse): string {
-  const created = getCreatedEvent(res.transaction.events![0]);
+  const first = res.transaction.events?.[0];
+  if (!first) throw new Error("No events in transaction");
+  const created = getCreatedEvent(first);
   if (!created) throw new Error("First event is not a CreatedEvent");
   return created.contractId;
 }
@@ -53,12 +55,9 @@ const sampleEvmParams: EvmTransactionParams = {
   recipient: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
   amount: "0x0000000000000000000000000000000000000000000000000000000005f5e100",
   nonce: "0x0000000000000000000000000000000000000000000000000000000000000001",
-  gasLimit:
-    "0x000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas:
-    "0x0000000000000000000000000000000000000000000000000000000ba43b7400",
-  maxPriorityFee:
-    "0x0000000000000000000000000000000000000000000000000000000077359400",
+  gasLimit: "0x000000000000000000000000000000000000000000000000000000000000c350",
+  maxFeePerGas: "0x0000000000000000000000000000000000000000000000000000000ba43b7400",
+  maxPriorityFee: "0x0000000000000000000000000000000000000000000000000000000077359400",
   chainId: "0x0000000000000000000000000000000000000000000000000000000000000001",
   value: "0x0000000000000000000000000000000000000000000000000000000000000000",
 };
@@ -70,10 +69,8 @@ const damlEvmParams = {
   amount: "0000000000000000000000000000000000000000000000000000000005f5e100",
   nonce: "0000000000000000000000000000000000000000000000000000000000000001",
   gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas:
-    "0000000000000000000000000000000000000000000000000000000ba43b7400",
-  maxPriorityFee:
-    "0000000000000000000000000000000000000000000000000000000077359400",
+  maxFeePerGas: "0000000000000000000000000000000000000000000000000000000ba43b7400",
+  maxPriorityFee: "0000000000000000000000000000000000000000000000000000000077359400",
   chainId: "0000000000000000000000000000000000000000000000000000000000000001",
   value: "0000000000000000000000000000000000000000000000000000000000000000",
   operation: "Erc20Transfer",
@@ -91,10 +88,7 @@ const RUN_ID = Math.random().toString(36).slice(2, 8);
 const ADMIN_USER = `admin-${RUN_ID}`;
 
 beforeAll(async () => {
-  const darPath = resolve(
-    __dirname,
-    "../../../.daml/dist/canton-mpc-poc-0.0.1.dar",
-  );
+  const darPath = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
   await uploadDar(darPath);
 
   issuer = await allocateParty(`Issuer_${RUN_ID}`);
@@ -110,12 +104,10 @@ describe("cross-runtime request_id", () => {
   it("TypeScript request_id matches Canton's request_id from RequestDeposit", async () => {
     const tsRequestId = computeRequestId(sampleEvmParams);
 
-    const orchResult = await createContract(
-      ADMIN_USER,
-      [issuer],
-      VAULT_ORCHESTRATOR,
-      { issuer, mpcPublicKey: TEST_PUB_KEY },
-    );
+    const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
+      issuer,
+      mpcPublicKey: TEST_PUB_KEY,
+    });
     const orchCid = firstCreatedCid(orchResult);
 
     const depositResult = await exerciseChoice(
@@ -146,12 +138,10 @@ describe("cross-runtime request_id", () => {
 // ---------------------------------------------------------------------------
 describe("cross-runtime deposit lifecycle", () => {
   it("deposit creates PendingDeposit with matching requestId", async () => {
-    const orchResult = await createContract(
-      ADMIN_USER,
-      [issuer],
-      VAULT_ORCHESTRATOR,
-      { issuer, mpcPublicKey: TEST_PUB_KEY },
-    );
+    const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
+      issuer,
+      mpcPublicKey: TEST_PUB_KEY,
+    });
     const orchCid = firstCreatedCid(orchResult);
 
     const depositResult = await exerciseChoice(
@@ -184,12 +174,10 @@ describe("cross-runtime deposit lifecycle", () => {
 // ---------------------------------------------------------------------------
 describe("cross-runtime withdrawal lifecycle", () => {
   it("withdrawal debits balance and creates PendingWithdrawal with correct requestId", async () => {
-    const orchResult = await createContract(
-      ADMIN_USER,
-      [issuer],
-      VAULT_ORCHESTRATOR,
-      { issuer, mpcPublicKey: TEST_PUB_KEY },
-    );
+    const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
+      issuer,
+      mpcPublicKey: TEST_PUB_KEY,
+    });
     const orchCid = firstCreatedCid(orchResult);
 
     const balResult = await createContract(ADMIN_USER, [issuer], USER_BALANCE, {
@@ -217,9 +205,7 @@ describe("cross-runtime withdrawal lifecycle", () => {
 
     const pending = findCreated(withdrawResult, "PendingWithdrawal");
     expect(pending).toBeDefined();
-    expect(getArgs(pending!).requestId).toBe(
-      computeRequestId(sampleEvmParams).slice(2),
-    );
+    expect(getArgs(pending!).requestId).toBe(computeRequestId(sampleEvmParams).slice(2));
 
     const newBal = findCreated(withdrawResult, "Erc20Holding");
     expect(newBal).toBeDefined();

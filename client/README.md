@@ -1,4 +1,4 @@
-# ts-tests
+# client
 
 TypeScript integration tests and scripts for the Canton MPC PoC.
 
@@ -11,13 +11,13 @@ TypeScript integration tests and scripts for the Canton MPC PoC.
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm test` | Cross-runtime integration tests (vitest) against a running sandbox |
-| `npm run test:watch` | Tests in watch mode |
-| `npm run demo` | Self-contained demo: sets up ledger, triggers deposit, polls for result |
-| `npm run deposit -- <issuer> <depositor> <orchCid> <userId>` | Trigger a deposit against an existing orchestrator |
-| `npm run observe` | Stream `PendingDeposit` events indefinitely (pair with `npm run deposit`) |
+| Command                                                      | Description                                                               |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `npm test`                                                   | Cross-runtime integration tests (vitest) against a running sandbox        |
+| `npm run test:watch`                                         | Tests in watch mode                                                       |
+| `npm run demo`                                               | Self-contained demo: sets up ledger, triggers deposit, polls for result   |
+| `npm run deposit -- <issuer> <depositor> <orchCid> <userId>` | Trigger a deposit against an existing orchestrator                        |
+| `npm run observe`                                            | Stream `PendingDeposit` events indefinitely (pair with `npm run deposit`) |
 
 ## Structure
 
@@ -44,7 +44,7 @@ generated/
 ```bash
 # From project root — after changing Daml templates
 dpm build
-dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o ts-tests/generated/model -s daml.js
+dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js
 ```
 
 Canton JSON API is hardcoded to `http://localhost:7575` in `src/infra/canton-client.ts`.

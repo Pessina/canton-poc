@@ -20,10 +20,7 @@ import { createLedgerStream } from "../infra/ledger-stream.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DAR_PATH = resolve(
-  __dirname,
-  "../../../.daml/dist/canton-mpc-poc-0.0.1.dar",
-);
+const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 
 const TEST_PUB_KEY =
@@ -35,10 +32,8 @@ const damlEvmParams = {
   amount: "0000000000000000000000000000000000000000000000000000000005f5e100",
   nonce: "0000000000000000000000000000000000000000000000000000000000000001",
   gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas:
-    "0000000000000000000000000000000000000000000000000000000ba43b7400",
-  maxPriorityFee:
-    "0000000000000000000000000000000000000000000000000000000077359400",
+  maxFeePerGas: "0000000000000000000000000000000000000000000000000000000ba43b7400",
+  maxPriorityFee: "0000000000000000000000000000000000000000000000000000000077359400",
   chainId: "0000000000000000000000000000000000000000000000000000000000000001",
   value: "0000000000000000000000000000000000000000000000000000000000000000",
   operation: "Erc20Transfer",
@@ -59,17 +54,13 @@ async function main() {
 
   await createUser(USER_ID, issuer, [depositor]);
 
-  const orchResult = await createContract(
-    USER_ID,
-    [issuer],
-    VAULT_ORCHESTRATOR,
-    { issuer, mpcPublicKey: TEST_PUB_KEY },
-  );
-  const firstEvent = orchResult.transaction.events![0];
+  const orchResult = await createContract(USER_ID, [issuer], VAULT_ORCHESTRATOR, {
+    issuer,
+    mpcPublicKey: TEST_PUB_KEY,
+  });
+  const firstEvent = orchResult.transaction.events?.[0];
   const orchCid =
-    "CreatedEvent" in firstEvent
-      ? firstEvent.CreatedEvent.contractId
-      : undefined;
+    firstEvent && "CreatedEvent" in firstEvent ? firstEvent.CreatedEvent.contractId : undefined;
   if (!orchCid) throw new Error("Failed to get VaultOrchestrator contract ID");
   console.log(`Orchestrator CID: ${orchCid}`);
 
@@ -114,7 +105,7 @@ async function main() {
           const created = event.CreatedEvent;
           if (!created.templateId?.includes("PendingDeposit")) continue;
 
-          const args = created.createArgument as Record<string, unknown>;
+          const args = created.createArgument as Record<string, string>;
           console.log(`[PendingDeposit detected]`);
           console.log(`  requestId: ${args.requestId}`);
           console.log(`  requester: ${args.requester}`);

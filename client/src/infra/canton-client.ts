@@ -32,8 +32,7 @@ export type Event = components["schemas"]["Event"];
 /** A ledger command (CreateCommand, ExerciseCommand, etc.) sent to the participant. */
 type Command = components["schemas"]["Command"];
 /** Response from `POST /v2/commands/submit-and-wait-for-transaction`. */
-export type TransactionResponse =
-  components["schemas"]["JsSubmitAndWaitForTransactionResponse"];
+export type TransactionResponse = components["schemas"]["JsSubmitAndWaitForTransactionResponse"];
 
 // ---------------------------------------------------------------------------
 // Party & User management
@@ -70,7 +69,10 @@ export async function allocateParty(hint: string): Promise<string> {
     }
     throw new Error(`allocateParty failed: ${msg}`);
   }
-  return data!.partyDetails!.party!;
+  if (!data?.partyDetails?.party) {
+    throw new Error("allocateParty: unexpected empty response");
+  }
+  return data.partyDetails.party;
 }
 
 /**
@@ -83,9 +85,7 @@ export async function allocateParty(hint: string): Promise<string> {
  */
 async function findPartyByHint(hint: string): Promise<string | undefined> {
   const { data } = await client.GET("/v2/parties");
-  const match = data?.partyDetails?.find((p) =>
-    p.party?.startsWith(`${hint}::`),
-  );
+  const match = data?.partyDetails?.find((p) => p.party?.startsWith(`${hint}::`));
   return match?.party ?? undefined;
 }
 
@@ -194,20 +194,17 @@ async function submitAndWait(
   actAs: string[],
   commands: Command[],
 ): Promise<TransactionResponse> {
-  const { data, error } = await client.POST(
-    "/v2/commands/submit-and-wait-for-transaction",
-    {
-      body: {
-        commands: {
-          commands,
-          commandId: crypto.randomUUID(),
-          userId,
-          actAs,
-          readAs: actAs,
-        },
-      } as components["schemas"]["JsSubmitAndWaitForTransactionRequest"],
-    },
-  );
+  const { data, error } = await client.POST("/v2/commands/submit-and-wait-for-transaction", {
+    body: {
+      commands: {
+        commands,
+        commandId: crypto.randomUUID(),
+        userId,
+        actAs,
+        readAs: actAs,
+      },
+    } as components["schemas"]["JsSubmitAndWaitForTransactionRequest"],
+  });
   if (error) throw new Error(`submitAndWait failed: ${JSON.stringify(error)}`);
   return data!;
 }
@@ -268,8 +265,7 @@ export async function exerciseChoice(
 // ---------------------------------------------------------------------------
 
 /** A single update item from the `POST /v2/updates` response. */
-export type JsGetUpdatesResponse =
-  components["schemas"]["JsGetUpdatesResponse"];
+export type JsGetUpdatesResponse = components["schemas"]["JsGetUpdatesResponse"];
 
 /**
  * Get the current ledger end offset via `GET /v2/state/ledger-end`.

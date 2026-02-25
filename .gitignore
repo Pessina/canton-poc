@@ -5,8 +5,8 @@
 log/
 
 # TypeScript
-ts-tests/node_modules/
-ts-tests/generated/
+client/node_modules/
+client/generated/
 
 # OS
 .DS_Store
