@@ -121,7 +121,6 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
     });
 
     ws.on("message", (data) => {
-      console.log("message", data.toString());
       try {
         const parsed: JsGetUpdatesResponse = JSON.parse(data.toString());
 
@@ -131,8 +130,6 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
           );
           return;
         }
-
-        console.log(JSON.stringify(parsed, null, 2));
 
         handleUpdate(parsed);
       } catch (err) {
