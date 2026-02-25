@@ -15,7 +15,7 @@ import {
 import {
   VaultOrchestrator,
   Erc20Holding,
-} from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+} from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,40 +51,31 @@ function firstCreatedCid(res: TransactionResponse): string {
 const sampleEvmParams: EvmTransactionParams = {
   erc20Address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
   recipient: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-  amount:
-    "0x0000000000000000000000000000000000000000000000000000000005f5e100",
-  nonce:
-    "0x0000000000000000000000000000000000000000000000000000000000000001",
+  amount: "0x0000000000000000000000000000000000000000000000000000000005f5e100",
+  nonce: "0x0000000000000000000000000000000000000000000000000000000000000001",
   gasLimit:
     "0x000000000000000000000000000000000000000000000000000000000000c350",
   maxFeePerGas:
     "0x0000000000000000000000000000000000000000000000000000000ba43b7400",
   maxPriorityFee:
     "0x0000000000000000000000000000000000000000000000000000000077359400",
-  chainId:
-    "0x0000000000000000000000000000000000000000000000000000000000000001",
-  value:
-    "0x0000000000000000000000000000000000000000000000000000000000000000",
+  chainId: "0x0000000000000000000000000000000000000000000000000000000000000001",
+  value: "0x0000000000000000000000000000000000000000000000000000000000000000",
 };
 
 // Daml contract params — same values WITHOUT 0x prefix (Daml uses bare hex)
 const damlEvmParams = {
   erc20Address: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
   recipient: "d8da6bf26964af9d7eed9e03e53415d37aa96045",
-  amount:
-    "0000000000000000000000000000000000000000000000000000000005f5e100",
-  nonce:
-    "0000000000000000000000000000000000000000000000000000000000000001",
-  gasLimit:
-    "000000000000000000000000000000000000000000000000000000000000c350",
+  amount: "0000000000000000000000000000000000000000000000000000000005f5e100",
+  nonce: "0000000000000000000000000000000000000000000000000000000000000001",
+  gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
   maxFeePerGas:
     "0000000000000000000000000000000000000000000000000000000ba43b7400",
   maxPriorityFee:
     "0000000000000000000000000000000000000000000000000000000077359400",
-  chainId:
-    "0000000000000000000000000000000000000000000000000000000000000001",
-  value:
-    "0000000000000000000000000000000000000000000000000000000000000000",
+  chainId: "0000000000000000000000000000000000000000000000000000000000000001",
+  value: "0000000000000000000000000000000000000000000000000000000000000000",
   operation: "Erc20Transfer",
 };
 
@@ -102,7 +93,7 @@ const ADMIN_USER = `admin-${RUN_ID}`;
 beforeAll(async () => {
   const darPath = resolve(
     __dirname,
-    "../../../.daml/dist/canton-mpc-poc-0.2.0.dar",
+    "../../../.daml/dist/canton-mpc-poc-0.0.1.dar",
   );
   await uploadDar(darPath);
 
@@ -201,17 +192,12 @@ describe("cross-runtime withdrawal lifecycle", () => {
     );
     const orchCid = firstCreatedCid(orchResult);
 
-    const balResult = await createContract(
-      ADMIN_USER,
-      [issuer],
-      USER_BALANCE,
-      {
-        issuer,
-        owner: depositor,
-        erc20Address: damlEvmParams.erc20Address,
-        amount: "500000000",
-      },
-    );
+    const balResult = await createContract(ADMIN_USER, [issuer], USER_BALANCE, {
+      issuer,
+      owner: depositor,
+      erc20Address: damlEvmParams.erc20Address,
+      amount: "500000000",
+    });
     const balCid = firstCreatedCid(balResult);
 
     const withdrawResult = await exerciseChoice(

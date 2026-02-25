@@ -19,10 +19,10 @@ import {
   type JsGetUpdatesResponse,
 } from "../infra/canton-client.js";
 import { createLedgerStream } from "../infra/ledger-stream.js";
-import { VaultOrchestrator } from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.2.0.dar");
+const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const TEST_PUB_KEY =

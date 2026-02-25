@@ -81,18 +81,33 @@ Depends on the `@daml/types` npm package for base types.
 
 ### Importing Generated Templates
 
+The `codegen-js` `-s daml.js` flag (or `npm-scope: daml.js` in `daml.yaml`) creates an npm-scoped package. Register it as a local dependency in `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@daml.js/canton-mpc-poc-0.0.1": "file:./generated/model/canton-mpc-poc-0.0.1"
+  }
+}
+```
+
+Then import using the scoped package name — **never use relative paths to the generated directory**:
+
 ```typescript
-// Import generated template (uses templateId, never hardcode)
+// CORRECT — idiomatic scoped import
 import {
   VaultOrchestrator,
-  UserErc20Balance,
-} from "../generated/model/my-project-0.1.0/lib/Erc20Vault/module.js";
+  Erc20Holding,
+} from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
+
+// WRONG — relative path to generated code (fragile, not idiomatic)
+// import { ... } from "../../generated/model/canton-mpc-poc-0.0.1/lib/Erc20Vault/module.js";
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 // e.g. "#canton-mpc-poc:Erc20Vault:VaultOrchestrator"
 ```
 
-**BEST PRACTICE**: Always import `templateId` from generated bindings instead of hardcoding strings. This ensures type safety and catches breakage at compile time when templates change.
+**BEST PRACTICE**: Always import `templateId` from generated bindings via the `@daml.js/` scoped package instead of hardcoding strings or using relative paths. This ensures type safety, catches breakage at compile time, and follows the official Daml SDK convention.
 
 ---
 
@@ -160,7 +175,7 @@ async function allocateParty(hint: string): Promise<string> {
 }
 ```
 
-The returned party string includes the full namespace, e.g. `Operator_abc123::122041a3...`.
+The returned party string includes the full namespace, e.g. `Issuer_abc123::122041a3...`.
 
 ---
 
@@ -323,7 +338,7 @@ The filter structure uses `filtersByParty` keyed by the party's full ID string. 
 const event = result.transaction.events[0].CreatedEvent!;
 const contractId = event.contractId;
 const args = event.createArgument;
-// e.g., args.requestId, args.amount, args.operator
+// e.g., args.requestId, args.amount, args.issuer
 ```
 
 **IMPORTANT**: The API accepts `createArguments` (plural) in command submission but returns `createArgument` (singular) in events. This asymmetry is a common source of bugs.
@@ -362,10 +377,10 @@ The `#` prefix enables package-name resolution so you do not need the full packa
 Example: "#canton-mpc-poc:Erc20Vault:VaultOrchestrator"
 ```
 
-**BEST PRACTICE**: Import from generated bindings instead of hardcoding:
+**BEST PRACTICE**: Import from generated bindings via scoped package instead of hardcoding:
 
 ```typescript
-import { VaultOrchestrator } from "../generated/model/.../module.js";
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 const tid = VaultOrchestrator.templateId;
 ```
 
@@ -385,7 +400,7 @@ ws.onopen = () => {
         includeTransactions: {
           eventFormat: {
             filtersByParty: {
-              [operatorParty]: {
+              [issuerParty]: {
                 cumulative: [
                   {
                     identifierFilter: {
@@ -466,9 +481,9 @@ import {
   createContract,
   exerciseChoice,
 } from "./canton-client.js";
-import { VaultOrchestrator } from "../generated/model/my-project-0.1.0/lib/Erc20Vault/module.js";
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
-let operator: string;
+let issuer: string;
 let depositor: string;
 const RUN_ID = Math.random().toString(36).slice(2, 8);
 const ADMIN_USER = `admin-${RUN_ID}`;
@@ -476,42 +491,42 @@ const ADMIN_USER = `admin-${RUN_ID}`;
 beforeAll(async () => {
   // Upload DAR
   await uploadDar(
-    resolve(__dirname, "../../.daml/dist/my-project-0.1.0.dar"),
+    resolve(__dirname, "../../.daml/dist/canton-mpc-poc-0.0.1.dar"),
   );
 
   // Allocate parties with unique names
-  operator = await allocateParty(`Operator_${RUN_ID}`);
+  issuer = await allocateParty(`Issuer_${RUN_ID}`);
   depositor = await allocateParty(`Depositor_${RUN_ID}`);
 
   // Create user with rights for both parties
-  await createUser(ADMIN_USER, operator, [depositor]);
+  await createUser(ADMIN_USER, issuer, [depositor]);
 }, 30_000);
 
 describe("VaultOrchestrator", () => {
   it("should create a contract", async () => {
     const result = await createContract(
       ADMIN_USER,
-      [operator],
+      [issuer],
       VaultOrchestrator.templateId,
       {
-        operator,
-        depositors: [depositor],
+        issuer,
+        mpcPublicKey: TEST_PUB_KEY,
       },
     );
 
     const events = result.transaction!.events!;
     const created = events.find((e) => e.CreatedEvent)?.CreatedEvent;
     expect(created).toBeDefined();
-    expect(created!.createArgument!.operator).toBe(operator);
+    expect(created!.createArgument!.issuer).toBe(issuer);
   });
 
   it("should exercise a choice", async () => {
     // First create the contract
     const createResult = await createContract(
       ADMIN_USER,
-      [operator],
+      [issuer],
       VaultOrchestrator.templateId,
-      { operator, depositors: [depositor] },
+      { issuer, mpcPublicKey: TEST_PUB_KEY },
     );
 
     const contractId = createResult.transaction!.events!.find(
@@ -521,11 +536,11 @@ describe("VaultOrchestrator", () => {
     // Then exercise a choice on it
     const exerciseResult = await exerciseChoice(
       ADMIN_USER,
-      [operator, depositor],
+      [issuer, depositor],
       VaultOrchestrator.templateId,
       contractId,
-      "SomeChoice",
-      { arg1: "value1" },
+      "RequestDeposit",
+      { requester: depositor, erc20Address: "a0b8...", amount: "100000000", evmParams: {} },
     );
 
     expect(exerciseResult.transaction).toBeDefined();
@@ -599,8 +614,35 @@ The submit endpoint expects `{ commands: { commands: [...], userId, actAs, ... }
 
 ### 9. Party ID Format
 
-Allocated party IDs include a namespace suffix (e.g., `Operator_abc123::122041a3...`). Always use the full string returned by the allocation endpoint, never truncate it.
+Allocated party IDs include a namespace suffix (e.g., `Issuer_abc123::122041a3...`). Always use the full string returned by the allocation endpoint, never truncate it.
 
 ### 10. readAs in Commands
 
 The `readAs` field in command submission should typically include the same parties as `actAs`. Missing `readAs` parties can cause contract-not-found errors when the submitting party needs visibility into contracts owned by other parties.
+
+### 11. Import Path for Generated Code
+
+Always use `@daml.js/` scoped package imports, never relative paths to the generated directory. The `-s daml.js` codegen flag creates an npm package that must be registered in `package.json` as a `file:` dependency:
+
+```json
+"@daml.js/canton-mpc-poc-0.0.1": "file:./generated/model/canton-mpc-poc-0.0.1"
+```
+
+```typescript
+// CORRECT
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
+
+// WRONG — fragile relative path
+import { VaultOrchestrator } from "../../generated/model/canton-mpc-poc-0.0.1/lib/Erc20Vault/module.js";
+```
+
+### 12. Canton Upgrade Validation (Template Renames)
+
+Canton enforces strict upgrade compatibility. Renaming a template field (e.g., `operator` → `issuer`) or template name (e.g., `UserErc20Balance` → `Erc20Holding`) is treated as an incompatible change — uploading the new DAR to a running sandbox fails with `NOT_VALID_UPGRADE_PACKAGE`. Restart the sandbox with a clean state for breaking changes during development.
+
+### 13. Daml Finance Naming Conventions
+
+Follow Daml Finance / CIP-56 Canton Token Standard naming:
+- **`issuer`** — the party that issues/manages the instrument (not `operator`)
+- **`Holding`** — asset ownership contracts (e.g., `Erc20Holding`, not `UserErc20Balance`)
+- **`owner`** — the party that owns the holding

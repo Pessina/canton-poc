@@ -53,21 +53,21 @@ The sandbox starts a full Canton node with:
 ```bash
 curl -X POST http://localhost:7575/v2/parties \
   -H "Content-Type: application/json" \
-  -d '{"partyIdHint": "Operator", "identityProviderId": ""}'
+  -d '{"partyIdHint": "Issuer", "identityProviderId": ""}'
 ```
 
 Response:
 ```json
 {
   "partyDetails": {
-    "party": "Operator::122034ab...5678",
+    "party": "Issuer::122034ab...5678",
     "isLocal": true,
     "identityProviderId": ""
   }
 }
 ```
 
-The full party ID includes a namespace suffix (e.g., `Operator::1220...`). Always use the full ID in subsequent API calls.
+The full party ID includes a namespace suffix (e.g., `Issuer::1220...`). Always use the full ID in subsequent API calls.
 
 ### Create a User with Rights
 
@@ -77,13 +77,13 @@ curl -X POST http://localhost:7575/v2/users \
   -d '{
     "user": {
       "id": "admin-user",
-      "primaryParty": "Operator::1220...",
+      "primaryParty": "Issuer::1220...",
       "isDeactivated": false,
       "identityProviderId": ""
     },
     "rights": [
-      {"kind": {"CanActAs": {"value": {"party": "Operator::1220..."}}}},
-      {"kind": {"CanReadAs": {"value": {"party": "Operator::1220..."}}}},
+      {"kind": {"CanActAs": {"value": {"party": "Issuer::1220..."}}}},
+      {"kind": {"CanReadAs": {"value": {"party": "Issuer::1220..."}}}},
       {"kind": {"CanActAs": {"value": {"party": "Depositor::1220..."}}}},
       {"kind": {"CanReadAs": {"value": {"party": "Depositor::1220..."}}}}
     ]
@@ -162,7 +162,7 @@ Canton enforces strict upgrade rules:
         "CreateCommand": {
           "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
           "createArguments": {
-            "operator": "Operator::1220...",
+            "issuer": "Issuer::1220...",
             "mpcPublicKey": "04abcdef..."
           }
         }
@@ -198,7 +198,7 @@ The `#` prefix enables package-name resolution so you don't need the full packag
         "CreateCommand": {
           "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
           "createArguments": {
-            "operator": "Operator::1220...",
+            "issuer": "Issuer::1220...",
             "mpcPublicKey": "04abcdef..."
           }
         }
@@ -206,8 +206,8 @@ The `#` prefix enables package-name resolution so you don't need the full packag
     ],
     "commandId": "create-orchestrator-001",
     "userId": "admin-user",
-    "actAs": ["Operator::1220..."],
-    "readAs": ["Operator::1220..."]
+    "actAs": ["Issuer::1220..."],
+    "readAs": ["Issuer::1220..."]
   }
 }
 ```
@@ -234,8 +234,8 @@ The `#` prefix enables package-name resolution so you don't need the full packag
     ],
     "commandId": "deposit-request-001",
     "userId": "admin-user",
-    "actAs": ["Operator::1220...", "Depositor::1220..."],
-    "readAs": ["Operator::1220...", "Depositor::1220..."]
+    "actAs": ["Issuer::1220...", "Depositor::1220..."],
+    "readAs": ["Issuer::1220...", "Depositor::1220..."]
   }
 }
 ```
@@ -248,7 +248,7 @@ curl -X POST http://localhost:7575/v2/state/active-contracts \
   -d '{
     "filter": {
       "filtersByParty": {
-        "Operator::1220...": {
+        "Issuer::1220...": {
           "cumulative": {
             "templateFilters": [
               {
@@ -275,7 +275,7 @@ curl -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transaction \
           "CreateCommand": {
             "templateId": "#canton-mpc-poc:Erc20Vault:VaultOrchestrator",
             "createArguments": {
-              "operator": "Operator::1220...",
+              "issuer": "Issuer::1220...",
               "mpcPublicKey": "04abcdef..."
             }
           }
@@ -283,8 +283,8 @@ curl -X POST http://localhost:7575/v2/commands/submit-and-wait-for-transaction \
       ],
       "commandId": "'"$(uuidgen)"'",
       "userId": "admin-user",
-      "actAs": ["Operator::1220..."],
-      "readAs": ["Operator::1220..."]
+      "actAs": ["Issuer::1220..."],
+      "readAs": ["Issuer::1220..."]
     }
   }'
 ```
@@ -369,7 +369,7 @@ This is expected behavior when re-running setup scripts.
 
 ### Party Not Found
 
-- Party IDs include a namespace suffix: `Operator::1220...` not just `Operator`
+- Party IDs include a namespace suffix: `Issuer::1220...` not just `Issuer`
 - Always use the full party ID returned from `/v2/parties`
 - Party IDs are stable for the lifetime of the sandbox but change on restart
 

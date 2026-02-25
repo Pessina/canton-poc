@@ -199,7 +199,7 @@ val issuer = participant1.parties.enable("Issuer")
 val depositor = participant2.parties.enable("Depositor")
 
 // Upload the DAR to both participants
-participants.all.dars.upload(".daml/dist/canton-mpc-poc-0.2.0.dar")
+participants.all.dars.upload(".daml/dist/canton-mpc-poc-0.0.1.dar")
 
 // Print party IDs for use in API calls
 println(s"Issuer:  ${issuer.toLf}")
@@ -347,7 +347,7 @@ health.status
 participant1.synchronizers.list_connected()
 
 // Upload updated DAR (after dpm build)
-participants.all.dars.upload(".daml/dist/canton-mpc-poc-0.2.0.dar")
+participants.all.dars.upload(".daml/dist/canton-mpc-poc-0.0.1.dar")
 
 // Allocate a new party
 val newParty = participant1.parties.enable("NewParty")

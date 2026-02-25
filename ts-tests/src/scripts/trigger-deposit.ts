@@ -9,7 +9,7 @@
  */
 
 import { exerciseChoice } from "../infra/canton-client.js";
-import { VaultOrchestrator } from "../../generated/model/canton-mpc-poc-0.2.0/lib/Erc20Vault/module.js";
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 

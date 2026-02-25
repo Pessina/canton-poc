@@ -69,7 +69,7 @@ Key rules:
 
 ```daml
 -- Allocate a party with a display name
-operator <- allocateParty "Operator"
+issuer <- allocateParty "Issuer"
 depositor <- allocateParty "Depositor"
 
 -- Allocate with hint and display name
@@ -87,15 +87,15 @@ alice <- allocatePartyWithHint "Alice" (PartyIdHint "alice")
 
 ```daml
 -- Create a contract (submit as the signatory)
-orchCid <- submit operator do
+orchCid <- submit issuer do
   createCmd VaultOrchestrator with
-    operator
+    issuer
     mpcPublicKey = testPubKeyHex
 
 -- Create returns ContractId
-balCid <- submit operator do
-  createCmd UserErc20Balance with
-    operator
+balCid <- submit issuer do
+  createCmd Erc20Holding with
+    issuer
     owner = user
     erc20Address = "a0b86991..."
     amount = 500_000_000
@@ -112,7 +112,7 @@ balCid <- submit operator do
 
 ```daml
 -- Exercise a choice on a contract
-pendingCid <- submit (actAs operator <> actAs depositor) do
+pendingCid <- submit (actAs issuer <> actAs depositor) do
   exerciseCmd orchCid RequestDeposit with
     requester = depositor
     erc20Address = "a0b86991..."
@@ -120,7 +120,7 @@ pendingCid <- submit (actAs operator <> actAs depositor) do
     evmParams = sampleEvmParams
 
 -- Exercise returning a tuple
-(newBalCid, pendingCid) <- submit (actAs operator <> actAs user) do
+(newBalCid, pendingCid) <- submit (actAs issuer <> actAs user) do
   exerciseCmd orchCid RequestWithdrawal with
     requester = user
     balanceCid = balCid
@@ -140,15 +140,15 @@ pendingCid <- submit (actAs operator <> actAs depositor) do
 ```daml
 -- IMPORTANT: submitMulti is deprecated in Daml 3.x
 -- Use the actAs combinator instead:
-result <- submit (actAs operator <> actAs depositor) do
+result <- submit (actAs issuer <> actAs depositor) do
   exerciseCmd cid MyChoice with arg1 = val1
 
 -- Single party (plain submit):
-result <- submit operator do
+result <- submit issuer do
   createCmd MyTemplate with ...
 
 -- Read-only parties (actAs + readAs):
-result <- submit (actAs operator <> readAs auditor) do
+result <- submit (actAs issuer <> readAs auditor) do
   exerciseCmd cid MyChoice with ...
 ```
 
@@ -174,10 +174,10 @@ maybePending <- queryContractId depositor pendingCid
 let pd = fromSome maybePending  -- unwrap Optional
 
 -- Query all contracts of a type visible to a party
-allBalances <- query @UserErc20Balance operator
+allBalances <- query @Erc20Holding issuer
 
 -- Query with filter
-myBalances <- queryFilter @UserErc20Balance operator
+myBalances <- queryFilter @Erc20Holding issuer
   (\b -> b.owner == depositor)
 ```
 
@@ -221,7 +221,7 @@ abort "Expected refund but got None"
 -- Test that a submission fails (useful for authorization tests)
 submitMustFail depositor do
   createCmd VaultOrchestrator with
-    operator = depositor  -- wrong party, should fail
+    issuer = depositor  -- wrong party, should fail
     mpcPublicKey = "..."
 
 -- Test that a choice exercise fails
@@ -251,17 +251,17 @@ submitMustFail (actAs depositor <> actAs user) do
 testDepositLifecycle : Script ()
 testDepositLifecycle = do
   -- 1. Setup: allocate parties
-  operator  <- allocateParty "Operator"
+  issuer    <- allocateParty "Issuer"
   depositor <- allocateParty "Depositor"
 
   -- 2. Create orchestrator contract
-  orchCid <- submit operator do
+  orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      operator
+      issuer
       mpcPublicKey = testPubKeyHex
 
   -- 3. Exercise choice that creates child contract
-  pendingCid <- submit (actAs operator <> actAs depositor) do
+  pendingCid <- submit (actAs issuer <> actAs depositor) do
     exerciseCmd orchCid RequestDeposit with
       requester = depositor
       erc20Address = "a0b86991..."
@@ -290,24 +290,24 @@ This pattern covers the most common test shape:
 ```daml
 testWithdrawalRefund : Script ()
 testWithdrawalRefund = do
-  operator <- allocateParty "Operator"
+  issuer <- allocateParty "Issuer"
   user     <- allocateParty "User"
 
   -- Setup contracts
-  orchCid <- submit operator do
+  orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      operator
+      issuer
       mpcPublicKey = testPubKeyHex
 
-  balCid <- submit operator do
-    createCmd UserErc20Balance with
-      operator
+  balCid <- submit issuer do
+    createCmd Erc20Holding with
+      issuer
       owner = user
       erc20Address = "a0b86991..."
       amount = 500_000_000
 
   -- Trigger withdrawal
-  (newBalCid, pendingCid) <- submit (actAs operator <> actAs user) do
+  (newBalCid, pendingCid) <- submit (actAs issuer <> actAs user) do
     exerciseCmd orchCid RequestWithdrawal with
       requester = user
       balanceCid = balCid
@@ -316,7 +316,7 @@ testWithdrawalRefund = do
       evmParams = sampleEvmParams
 
   -- Complete with bad signature -> triggers refund
-  refundResult <- submit operator do
+  refundResult <- submit issuer do
     exerciseCmd orchCid CompleteWithdrawal with
       pendingCid
       balanceCid = newBalCid
@@ -408,24 +408,24 @@ Helper functions for repeated setup:
 
 ```daml
 -- Setup helper: create orchestrator + balance
-setupTestEnv : Script (Party, Party, ContractId VaultOrchestrator, ContractId UserErc20Balance)
+setupTestEnv : Script (Party, Party, ContractId VaultOrchestrator, ContractId Erc20Holding)
 setupTestEnv = do
-  operator <- allocateParty "Operator"
+  issuer <- allocateParty "Issuer"
   user     <- allocateParty "User"
 
-  orchCid <- submit operator do
+  orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      operator
+      issuer
       mpcPublicKey = testPubKeyHex
 
-  balCid <- submit operator do
-    createCmd UserErc20Balance with
-      operator
+  balCid <- submit issuer do
+    createCmd Erc20Holding with
+      issuer
       owner = user
       erc20Address = "a0b86991..."
       amount = 500_000_000
 
-  pure (operator, user, orchCid, balCid)
+  pure (issuer, user, orchCid, balCid)
 ```
 
 Usage in tests:
@@ -433,7 +433,7 @@ Usage in tests:
 ```daml
 testSomething : Script ()
 testSomething = do
-  (operator, user, orchCid, balCid) <- setupTestEnv
+  (issuer, user, orchCid, balCid) <- setupTestEnv
   -- ... test logic using the pre-built environment
   pure ()
 ```
@@ -466,11 +466,11 @@ testSomething = do
    exactly where the failure occurs.
 
    ```daml
-   orchCid <- submit operator do createCmd VaultOrchestrator with ...
-   orchData <- queryContractId operator orchCid
+   orchCid <- submit issuer do createCmd VaultOrchestrator with ...
+   orchData <- queryContractId issuer orchCid
    assertMsg "Orchestrator must exist" (isSome orchData)
 
-   pendingCid <- submit (actAs operator <> actAs depositor) do
+   pendingCid <- submit (actAs issuer <> actAs depositor) do
      exerciseCmd orchCid RequestDeposit with ...
    pendingData <- queryContractId depositor pendingCid
    assertMsg "Pending deposit must exist" (isSome pendingData)
@@ -495,7 +495,7 @@ testSomething = do
 
    ```daml
    -- If the choice returns (ContractId A, ContractId B):
-   (aCid, bCid) <- submit operator do exerciseCmd cid MyChoice with ...
+   (aCid, bCid) <- submit issuer do exerciseCmd cid MyChoice with ...
    ```
 
 ---
@@ -506,8 +506,8 @@ testSomething = do
 
 **Wrong:**
 ```daml
--- This only authorizes operator, not depositor
-result <- submit operator do
+-- This only authorizes issuer, not depositor
+result <- submit issuer do
   exerciseCmd orchCid RequestDeposit with
     requester = depositor
     ...
@@ -515,7 +515,7 @@ result <- submit operator do
 
 **Right:**
 ```daml
-result <- submit (actAs operator <> actAs depositor) do
+result <- submit (actAs issuer <> actAs depositor) do
   exerciseCmd orchCid RequestDeposit with
     requester = depositor
     ...
@@ -525,13 +525,13 @@ result <- submit (actAs operator <> actAs depositor) do
 
 **Wrong:**
 ```daml
-result <- submitMulti [operator, depositor] [] do
+result <- submitMulti [issuer, depositor] [] do
   exerciseCmd cid MyChoice with ...
 ```
 
 **Right:**
 ```daml
-result <- submit (actAs operator <> actAs depositor) do
+result <- submit (actAs issuer <> actAs depositor) do
   exerciseCmd cid MyChoice with ...
 ```
 
@@ -556,12 +556,12 @@ assertMsg "check" (pd.amount == 100)
 **Wrong:**
 ```daml
 -- Party literals are fragile and may not match runtime identities
-let operator = getParty "Operator"
+let issuer = getParty "Issuer"
 ```
 
 **Right:**
 ```daml
-operator <- allocateParty "Operator"
+issuer <- allocateParty "Issuer"
 ```
 
 ### 5. Missing `import Daml.Script`
@@ -596,7 +596,7 @@ final line:
 ```daml
 testFoo : Script ()
 testFoo = do
-  cid <- submit operator do createCmd MyTemplate with ...
+  cid <- submit issuer do createCmd MyTemplate with ...
   -- cid has type ContractId MyTemplate, not Script ()
   pure ()  -- required to satisfy the Script () return type
 ```

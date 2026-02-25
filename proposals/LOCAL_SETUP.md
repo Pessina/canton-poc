@@ -61,7 +61,7 @@ These concerns are covered in [PROD_SETUP.md](./PROD_SETUP.md).
 | `npx hardhat compile`   | `dpm build`                                                                                                                                                       |
 | `npx hardhat test`      | `dpm test`                                                                                                                                                        |
 | `npx hardhat node`      | `dpm sandbox`                                                                                                                                                     |
-| `hardhat run deploy.js` | `curl -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` |
+| `hardhat run deploy.js` | `curl -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.0.1.dar` |
 | ethers.js / web3.js     | gRPC via `tonic` (Rust) or JSON Ledger API v2 via `fetch`/`reqwest`                                                                                               |
 | Hardhat console         | Canton Console (`./bin/canton -c config/...`) — not needed for sandbox                                                                                            |
 | `hardhat.config.js`     | `daml.yaml`                                                                                                                                                       |
@@ -119,7 +119,7 @@ export _JAVA_OPTIONS="-Xmx4g"
 
 ```bash
 dpm build
-# Output: .daml/dist/canton-mpc-poc-0.2.0.dar
+# Output: .daml/dist/canton-mpc-poc-0.0.1.dar
 ```
 
 This compiles all `.daml` files in the `daml/` directory into a DAR (Daml Archive). The output path is determined by `name` and `version` in `daml.yaml`.
@@ -143,7 +143,7 @@ Tests execute against an in-memory ledger — no Canton sandbox needed. This is 
 
 ```bash
 # Start sandbox with DAR loaded at startup
-dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar
+dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.0.1.dar
 ```
 
 This starts a full Canton node with:
@@ -395,7 +395,7 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 1. Edit Daml contracts    →  daml/*.daml
 2. Build                  →  dpm build
 3. Test (offline)         →  dpm test
-4. Start Canton           →  dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar
+4. Start Canton           →  dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.0.1.dar
 5. Wait for health        →  curl --retry 10 --retry-delay 2 --retry-connrefused http://localhost:7575/health
 6. Setup parties + user   →  POST /v2/parties + POST /v2/users (see steps 4-5 above)
 7. Create contracts       →  POST /v2/commands/submit-and-wait-for-transaction
@@ -421,13 +421,13 @@ No existing Rust crates for Canton 3.x — build from proto stubs with `tonic-bu
 | `dpm build`                                                                                                                                                          | Compile Daml to .dar                   |
 | `dpm test`                                                                                                                                                           | Run all Daml Script tests              |
 | `dpm test --test-pattern "testName"`                                                                                                                                 | Run a specific test                    |
-| `dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.2.0.dar`                                                                                         | Start sandbox with DAR                 |
+| `dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.0.1.dar`                                                                                         | Start sandbox with DAR                 |
 | `curl http://localhost:7575/health`                                                                                                                                  | Health check (HTTP 200 = ready)        |
 | `curl -s -X POST http://localhost:7575/v2/parties -H "Content-Type: application/json" -d '{"partyIdHint":"Alice","identityProviderId":""}'`                          | Allocate a party                       |
-| `curl -s -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.2.0.dar` | Upload DAR (if not loaded at startup)  |
+| `curl -s -X POST "http://localhost:7575/v2/dars?vetAllPackages=true" -H "Content-Type: application/octet-stream" --data-binary @.daml/dist/canton-mpc-poc-0.0.1.dar` | Upload DAR (if not loaded at startup)  |
 | `curl http://localhost:7575/docs/openapi`                                                                                                                            | OpenAPI spec (YAML)                    |
 | `curl http://localhost:7575/docs/asyncapi`                                                                                                                           | AsyncAPI spec (WebSocket)              |
-| `dpm daml script --dar .daml/dist/canton-mpc-poc-0.2.0.dar --script-name Test:test5_depositLifecycle --ledger-host localhost --ledger-port 6865`                     | Run a Daml Script against live sandbox |
+| `dpm daml script --dar .daml/dist/canton-mpc-poc-0.0.1.dar --script-name Test:test5_depositLifecycle --ledger-host localhost --ledger-port 6865`                     | Run a Daml Script against live sandbox |
 
 ---
 

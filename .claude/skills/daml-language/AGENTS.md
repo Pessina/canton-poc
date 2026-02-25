@@ -183,18 +183,18 @@ deriving (Eq, Show)    -- Multiple derivations
 Templates define contract types on the ledger. They specify the contract payload, authorization rules, and available operations (choices).
 
 ```daml
-template UserErc20Balance
+template Erc20Holding
   with
-    operator     : Party
+    issuer       : Party
     owner        : Party
     erc20Address : BytesHex
     amount       : Int
   where
-    signatory operator
+    signatory issuer
     observer owner
 
     -- Contract key (optional)
-    key (operator, owner, erc20Address) : (Party, Party, BytesHex)
+    key (issuer, owner, erc20Address) : (Party, Party, BytesHex)
     maintainer key._1
 ```
 
@@ -219,8 +219,8 @@ template MyTemplate
 - **Observer**: Parties that can see the contract but did not authorize creation.
 
 ```daml
-signatory operator              -- Single signatory
-signatory operator, owner       -- Multiple signatories (ALL must authorize)
+signatory issuer                -- Single signatory
+signatory issuer, owner         -- Multiple signatories (ALL must authorize)
 observer owner                  -- Single observer
 observer owner, auditor         -- Multiple observers
 ```
@@ -266,10 +266,10 @@ Choices define operations that can be performed on a contract.
 A consuming choice **archives** (consumes) the contract when exercised. The contract can no longer be used after.
 
 ```daml
-    choice Transfer : ContractId UserErc20Balance
+    choice Transfer : ContractId Erc20Holding
       with
         newOwner : Party
-      controller operator
+      controller issuer
       do
         create this with owner = newOwner
 ```
@@ -289,7 +289,7 @@ A nonconsuming choice does **NOT** archive the contract. The contract remains ac
       with
         requester : Party
         amount    : Int
-      controller operator, requester
+      controller issuer, requester
       do
         create PendingDeposit with ..
 ```
@@ -314,7 +314,7 @@ Archives the contract **after** executing the body. The body sees the contract a
 
 ```daml
     postconsuming choice Finalize : ()
-      controller operator
+      controller issuer
       do
         -- contract is still active here
         ...
@@ -324,8 +324,8 @@ Archives the contract **after** executing the body. The body sees the contract a
 ### Controller Patterns
 
 ```daml
-controller operator               -- Single party controls
-controller operator, requester    -- Multiple parties (ALL must authorize)
+controller issuer                 -- Single party controls
+controller issuer, requester    -- Multiple parties (ALL must authorize)
 ```
 
 When multiple controllers are listed, **all** of them must submit/authorize the transaction.
@@ -334,7 +334,7 @@ When multiple controllers are listed, **all** of them must submit/authorize the 
 
 ```daml
     choice Archive_ : ()
-      controller operator
+      controller issuer
       do
         pure ()
 ```
@@ -342,10 +342,10 @@ When multiple controllers are listed, **all** of them must submit/authorize the 
 ### Choice Returning Multiple Values
 
 ```daml
-    choice Split : (ContractId UserErc20Balance, ContractId UserErc20Balance)
+    choice Split : (ContractId Erc20Holding, ContractId Erc20Holding)
       with
         splitAmount : Int
-      controller operator
+      controller issuer
       do
         cid1 <- create this with amount = splitAmount
         cid2 <- create this with amount = amount - splitAmount
@@ -643,7 +643,7 @@ result <- exerciseByKey @NamedContract (owner, "myName") MyChoice with arg = val
 ### Composite Keys
 
 ```daml
-key (operator, owner, erc20Address) : (Party, Party, BytesHex)
+key (issuer, owner, erc20Address) : (Party, Party, BytesHex)
 maintainer key._1
 ```
 
@@ -887,7 +887,7 @@ do
 do
   cids <- forA recipients $ \recipient ->
     create Notification with
-      sender = operator
+      sender = issuer
       receiver = recipient
       message = "Hello"
   pure cids
@@ -899,7 +899,7 @@ do
 choice ProcessPayment : ContractId Receipt
   with
     paymentAmount : Int
-  controller operator
+  controller issuer
   do
     assertMsg "Amount must be positive" (paymentAmount > 0)
     when (paymentAmount > 10000) $
@@ -914,10 +914,10 @@ choice ProcessPayment : ContractId Receipt
 When creating a contract with fields that match names in scope:
 
 ```daml
-let operator = someParty
+let issuer = someParty
 let owner = someOtherParty
 let amount = 100
-create MyTemplate with ..   -- fills operator, owner, amount from scope
+create MyTemplate with ..   -- fills issuer, owner, amount from scope
 ```
 
 Partial spread:
@@ -936,7 +936,7 @@ Inside a choice body, `this` refers to the current contract payload:
 choice UpdateAmount : ContractId MyTemplate
   with
     newAmount : Int
-  controller operator
+  controller issuer
   do
     create this with amount = newAmount
 ```

@@ -18,7 +18,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@daml.js/canton-mpc-poc-0.2.0": "file:./generated/model/canton-mpc-poc-0.2.0",
+    "@daml.js/canton-mpc-poc-0.0.1": "file:./generated/model/canton-mpc-poc-0.0.1",
     "@daml/types": "^3.4.11",
     "@mojotech/json-type-validation": "^3.1.0",
     "openapi-fetch": "^0.17.0",
