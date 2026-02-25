@@ -11,56 +11,56 @@ importers:
         specifier: file:./generated/model/canton-mpc-poc-0.0.1
         version: file:generated/model/canton-mpc-poc-0.0.1
       "@daml/types":
-        specifier: 3.4.11
+        specifier: ^3.4.11
         version: 3.4.11
       "@mojotech/json-type-validation":
-        specifier: 3.1.0
+        specifier: ^3.1.0
         version: 3.1.0
       openapi-fetch:
-        specifier: 0.17.0
+        specifier: ^0.17.0
         version: 0.17.0
       viem:
-        specifier: 2.46.3
+        specifier: ^2.46.3
         version: 2.46.3(typescript@5.9.3)
       ws:
-        specifier: 8.19.0
+        specifier: ^8.19.0
         version: 8.19.0
     devDependencies:
       "@eslint/js":
-        specifier: 10.0.1
+        specifier: ^10.0.1
         version: 10.0.1(eslint@10.0.2(jiti@2.6.1))
       "@types/node":
-        specifier: 25.3.0
+        specifier: ^25.3.0
         version: 25.3.0
       "@types/ws":
-        specifier: 8.18.1
+        specifier: ^8.18.1
         version: 8.18.1
       eslint:
-        specifier: 10.0.2
+        specifier: ^10.0.2
         version: 10.0.2(jiti@2.6.1)
       eslint-config-prettier:
-        specifier: 10.1.8
+        specifier: ^10.1.8
         version: 10.1.8(eslint@10.0.2(jiti@2.6.1))
       jiti:
-        specifier: 2.6.1
+        specifier: ^2.6.1
         version: 2.6.1
       openapi-typescript:
-        specifier: 7.13.0
+        specifier: ^7.13.0
         version: 7.13.0(typescript@5.9.3)
       prettier:
-        specifier: 3.8.1
+        specifier: ^3.8.1
         version: 3.8.1
       tsx:
-        specifier: 4.21.0
+        specifier: ^4.21.0
         version: 4.21.0
       typescript:
-        specifier: 5.9.3
+        specifier: ^5.9.3
         version: 5.9.3
       typescript-eslint:
-        specifier: 8.56.1
+        specifier: ^8.56.1
         version: 8.56.1(eslint@10.0.2(jiti@2.6.1))(typescript@5.9.3)
       vitest:
-        specifier: 4.0.18
+        specifier: ^4.0.18
         version: 4.0.18(@types/node@25.3.0)(jiti@2.6.1)(tsx@4.21.0)
 
 packages:
