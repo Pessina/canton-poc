@@ -14,8 +14,9 @@ import {
   createContract,
   exerciseChoice,
   getLedgerEnd,
-  getUpdates,
+  type JsGetUpdatesResponse,
 } from "../infra/canton-client.js";
+import { createLedgerStream } from "../infra/ledger-stream.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -92,38 +93,44 @@ async function main() {
   );
   console.log(`RequestDeposit tx: ${result.transaction.updateId}`);
 
-  // 4. Poll for the PendingDeposit event
+  // 4. Stream updates and wait for PendingDeposit
   console.log("\n=== Observing ===");
-  let offset = offsetBefore;
-  const deadline = Date.now() + 10_000;
 
-  while (Date.now() < deadline) {
-    const updates = await getUpdates(offset, [issuer]);
-    for (const item of updates) {
-      const update = item.update;
-      if (!("Transaction" in update)) continue;
-      const tx = update.Transaction.value;
-      offset = tx.offset;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      stream.close();
+      reject(new Error("Timed out waiting for PendingDeposit event"));
+    }, 10_000);
 
-      for (const event of tx.events ?? []) {
-        if (!("CreatedEvent" in event)) continue;
-        const created = event.CreatedEvent;
-        if (!created.templateId?.includes("PendingDeposit")) continue;
+    const stream = createLedgerStream({
+      parties: [issuer],
+      beginExclusive: offsetBefore,
+      onUpdate: (item: JsGetUpdatesResponse) => {
+        const update = item.update;
+        if (!("Transaction" in update)) return;
 
-        const args = created.createArgument as Record<string, unknown>;
-        console.log(`[PendingDeposit detected]`);
-        console.log(`  requestId: ${args.requestId}`);
-        console.log(`  requester: ${args.requester}`);
-        console.log(`  amount:    ${args.amount}`);
-        console.log(`  erc20:     ${args.erc20Address}`);
-        console.log("\nDemo complete.");
-        process.exit(0);
-      }
-    }
-  }
+        for (const event of update.Transaction.value.events ?? []) {
+          if (!("CreatedEvent" in event)) continue;
+          const created = event.CreatedEvent;
+          if (!created.templateId?.includes("PendingDeposit")) continue;
 
-  console.error("Timed out waiting for PendingDeposit event");
-  process.exit(1);
+          const args = created.createArgument as Record<string, unknown>;
+          console.log(`[PendingDeposit detected]`);
+          console.log(`  requestId: ${args.requestId}`);
+          console.log(`  requester: ${args.requester}`);
+          console.log(`  amount:    ${args.amount}`);
+          console.log(`  erc20:     ${args.erc20Address}`);
+
+          clearTimeout(timeout);
+          stream.close();
+          resolve();
+        }
+      },
+      onError: (err) => console.error("Stream error:", err),
+    });
+  });
+
+  console.log("\nDemo complete.");
 }
 
 main().catch((err) => {

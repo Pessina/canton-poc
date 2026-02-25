@@ -23,14 +23,14 @@ export const BASE_URL = "http://localhost:7575";
  * Created via `openapi-fetch` and parameterised with the generated `paths` type
  * so that every `client.GET`/`client.POST` call is validated at compile time.
  */
-export const client = createClient<paths>({ baseUrl: BASE_URL });
+const client = createClient<paths>({ baseUrl: BASE_URL });
 
 /** A single contract creation event returned inside a transaction. */
 export type CreatedEvent = components["schemas"]["CreatedEvent"];
 /** A ledger event — a {@link CreatedEvent}, an ArchivedEvent, or an ExercisedEvent. */
 export type Event = components["schemas"]["Event"];
 /** A ledger command (CreateCommand, ExerciseCommand, etc.) sent to the participant. */
-export type Command = components["schemas"]["Command"];
+type Command = components["schemas"]["Command"];
 /** Response from `POST /v2/commands/submit-and-wait-for-transaction`. */
 export type TransactionResponse =
   components["schemas"]["JsSubmitAndWaitForTransactionResponse"];
@@ -189,7 +189,7 @@ export async function uploadDar(darPath: string): Promise<void> {
  *
  * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | POST /v2/commands/submit-and-wait-for-transaction}
  */
-export async function submitAndWait(
+async function submitAndWait(
   userId: string,
   actAs: string[],
   commands: Command[],

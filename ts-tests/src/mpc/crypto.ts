@@ -24,7 +24,7 @@ function padHex(hex: Hex, size: number): Hex {
  * abi_encode_packed equivalent: concatenate all params at their canonical EVM widths.
  * Mirrors Daml's packParams in Crypto.daml.
  */
-export function packParams(p: EvmTransactionParams): Hex {
+function packParams(p: EvmTransactionParams): Hex {
   return concat([
     padHex(p.erc20Address, 20), // address = 20 bytes
     padHex(p.recipient, 20),
@@ -44,12 +44,4 @@ export function packParams(p: EvmTransactionParams): Hex {
  */
 export function computeRequestId(params: EvmTransactionParams): Hex {
   return keccak256(packParams(params));
-}
-
-/**
- * Compute response_hash = keccak256(request_id || serialized_output).
- * Mirrors Daml's computeResponseHash.
- */
-export function computeResponseHash(requestId: Hex, output: Hex): Hex {
-  return keccak256(concat([requestId, output]));
 }
