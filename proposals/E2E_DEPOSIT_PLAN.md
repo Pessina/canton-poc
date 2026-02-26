@@ -36,68 +36,67 @@ The MPC posts signatures to separate templates; the relayer submits to
 Ethereum and triggers the final claim:
 
 ```
-Test                 Canton                   MPC Service                  Relayer                  Sepolia
-  │                    │                          │                          │                        │
-  │  RequestDeposit    │                          │                          │                        │
-  ├───(evmParams,─────►│                          │                          │                        │
-  │    path, caip2Id)  │                          │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │  PendingDeposit           │                          │                        │
-  │                    │  (path, caip2Id,          │                          │                        │
-  │                    │   requester=predId)       │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │          observes Pending │                          │                        │
-  │                    │─────────────────────────►│                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │  buildCalldata(sig, args) │                        │
-  │                    │                          │  serializeTx(evmParams)   │                        │
-  │                    │                          │  → keccak256 → txHash    │                        │
-  │                    │                          │  deriveChildKey(requester,│                        │
-  │                    │                          │    path, caip2Id)         │                        │
-  │                    │                          │  sign(txHash, childKey)   │                        │
-  │                    │                          │                          │                        │
-  │                    │              SignEvmTx    │                          │                        │
-  │                    │◄─── MpcSignature(r,s,v) ─┤                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │          observes MpcSig  │                        │
-  │                    │──────────────────────────┼─────────────────────────►│                        │
-  │                    │                          │                          │                        │
-  │                    │                          │                          │  reconstructSignedTx    │
-  │                    │                          │                          ├──── sendRawTx ────────►│
-  │                    │                          │                          │◄──── receipt ─────────┤
-  │                    │                          │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │  polls Sepolia for the    │                        │
-  │                    │                          │  signed tx it produced    │                        │
-  │                    │                          │  (knows expected hash)    │                        │
-  │                    │                          │                          │                        │
-  │                    │                          ├───────── getReceipt ─────┼───────────────────────►│
-  │                    │                          │◄────────────────────────┼────────────────────────┤
-  │                    │                          │                          │                        │
-  │                    │                          │  verify receipt.status    │                        │
-  │                    │                          │  sign outcome (DER)       │                        │
-  │                    │                          │                          │                        │
-  │                    │        ProvideOutcomeSig  │                          │                        │
-  │                    │◄── TxOutcomeSignature ───┤                          │                        │
-  │                    │        (DER sig, output)  │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │                          │                        │
-  │                    │                          │        observes Outcome   │                        │
-  │                    │──────────────────────────┼─────────────────────────►│                        │
-  │                    │                          │                          │                        │
-  │                    │                          │  ClaimDeposit             │                        │
-  │                    │◄─────────────────────────┼── (pendingCid, outCid) ──┤                        │
-  │                    │                          │                          │                        │
-  │                    │  verify MPC sig on-chain  │                          │                        │
-  │                    │  archive Pending + Outcome│                          │                        │
-  │                    │                          │                          │                        │
-  │                    ├─ Erc20Holding             │                          │                        │
-  │                    │                          │                          │                        │
-  │◄── poll ──────────┤                          │                          │                        │
-  │    assert balance  │                          │                          │                        │
-  │                    │                          │                          │                        │
+ Test              Canton             MPC Service           Relayer             Sepolia
+  │                  │                     │                   │                   │
+  │ RequestDeposit   │                     │                   │                   │
+  │ (evmParams,      │                     │                   │                   │
+  │  path, caip2Id)  │                     │                   │                   │
+  ├─────────────────►│                     │                   │                   │
+  │                  │                     │                   │                   │
+  │                  │ PendingDeposit      │                   │                   │
+  │                  │ (path, caip2Id,     │                   │                   │
+  │                  │  requester=predId)  │                   │                   │
+  │                  │                     │                   │                   │
+  │                  │  observes Pending   │                   │                   │
+  │                  │────────────────────►│                   │                   │
+  │                  │                     │                   │                   │
+  │                  │                     │ buildCalldata     │                   │
+  │                  │                     │ serializeTx       │                   │
+  │                  │                     │ keccak256→txHash  │                   │
+  │                  │                     │ deriveChildKey    │                   │
+  │                  │                     │ sign(txHash)      │                   │
+  │                  │                     │                   │                   │
+  │                  │      SignEvmTx      │                   │                   │
+  │                  │◄── MpcSignature ────┤                   │                   │
+  │                  │    (r, s, v)        │                   │                   │
+  │                  │                     │                   │                   │
+  │                  │       observes MpcSignature             │                   │
+  │                  │────────────────────►├──────────────────►│                   │
+  │                  │                     │                   │                   │
+  │                  │                     │                   │ reconstructTx     │
+  │                  │                     │                   ├── sendRawTx ─────►│
+  │                  │                     │                   │◄── receipt ───────┤
+  │                  │                     │                   │                   │
+  │                  │                     │ polls Sepolia     │                   │
+  │                  │                     │ (knows expected   │                   │
+  │                  │                     │  signed tx hash)  │                   │
+  │                  │                     │                   │                   │
+  │                  │                     ├─── getReceipt ────┼──────────────────►│
+  │                  │                     │◄──────────────────┼───────────────────┤
+  │                  │                     │                   │                   │
+  │                  │                     │ verify status     │                   │
+  │                  │                     │ sign outcome      │                   │
+  │                  │                     │                   │                   │
+  │                  │  ProvideOutcomeSig  │                   │                   │
+  │                  │◄── TxOutcomeSig ────┤                   │                   │
+  │                  │   (DER sig, output) │                   │                   │
+  │                  │                     │                   │                   │
+  │                  │      observes TxOutcomeSignature        │                   │
+  │                  │────────────────────►├──────────────────►│                   │
+  │                  │                     │                   │                   │
+  │                  │                     │    ClaimDeposit   │                   │
+  │                  │◄────────────────────┼─ (pendCid,outCid)─┤                   │
+  │                  │                     │                   │                   │
+  │                  │ verify MPC sig      │                   │                   │
+  │                  │ archive Pending     │                   │                   │
+  │                  │ archive OutcomeSig  │                   │                   │
+  │                  │                     │                   │                   │
+  │                  ├─ Erc20Holding       │                   │                   │
+  │                  │                     │                   │                   │
+  │── poll ─────────►│                     │                   │                   │
+  │◄── Erc20Holding ─┤                     │                   │                   │
+  │  assert balance  │                     │                   │                   │
+  │                  │                     │                   │                   │
 ```
 
 ### Actor Responsibilities
@@ -404,16 +403,22 @@ with `packParams` replacing the RLP payload.
 ```daml
 -- | abi_encode_packed equivalent for EVM transaction fields.
 -- Replaces the RLP payload in Solana's getRequestIdBidirectional.
+-- Includes every field that the RLP-encoded EIP-1559 tx carries:
+--   chainId, nonce, maxPriorityFee, maxFeePerGas, gasLimit, to, value,
+--   data (= functionSignature + args), accessList (always empty — omitted).
 packParams : EvmTransactionParams -> BytesHex
 packParams p =
   padHex p.to 20
-    <> foldl (<>) "" p.args       -- concatenated args (variable length)
+    <> textToHex p.functionSignature  -- e.g., "transfer(address,uint256)"
+    <> foldl (<>) "" p.args           -- concatenated args (variable length)
     <> padHex p.value          32
     <> padHex p.nonce          32
     <> padHex p.gasLimit       32
     <> padHex p.maxFeePerGas   32
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
+-- NOTE: accessList is always [] in this PoC — not included in packing.
+-- If access lists are supported later, they must be added here.
 
 -- | Convert Text to hex-encoded UTF-8 bytes.
 -- e.g., "ECDSA" → "4543445341"
