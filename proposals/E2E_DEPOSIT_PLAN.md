@@ -169,6 +169,33 @@ Each step is observable by the next actor via Canton's ledger update stream
 
 ## Daml Contract Changes
 
+### `VaultOrchestrator` — the orchestrator (Erc20Vault.daml)
+
+`VaultOrchestrator` is the singleton orchestrator contract. It owns the MPC
+public key and hosts all choices that drive the deposit lifecycle. All evidence
+contracts (`EcdsaSignature`, `EvmTxOutcomeSignature`) and state contracts
+(`PendingEvmDeposit`, `Erc20Holding`) are created through its choices.
+
+```daml
+template VaultOrchestrator
+  with
+    issuer       : Party          -- the party that operates the vault
+    mpcPublicKey : PublicKeyHex   -- SPKI-encoded secp256k1 public key
+  where
+    signatory issuer
+
+    -- Deposit lifecycle choices:
+    nonconsuming choice RequestEvmDeposit    : ContractId PendingEvmDeposit
+    nonconsuming choice SignEvmTx            : ContractId EcdsaSignature
+    nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
+    nonconsuming choice ClaimEvmDeposit      : ContractId Erc20Holding
+```
+
+The existing `RequestDeposit`, `ClaimDeposit`, `RequestWithdrawal`, and
+`CompleteWithdrawal` choices are replaced by the `Evm`-prefixed versions.
+`mpcPublicKey` is set once at creation and used by `ClaimEvmDeposit` to verify
+the MPC's DER signature via `secp256k1WithEcdsaOnly`.
+
 ### Modified: `EvmTransactionParams` — generic EIP-1559 (Types.daml)
 
 Replace the current ERC20-specific fields with generic EIP-1559 transaction
