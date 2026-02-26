@@ -133,7 +133,7 @@ signature.
 | Deposit lifecycle | PendingErc20Deposit consumed at claim | PendingDeposit stays as anchor; MPC posts signatures to separate templates |
 | Response key | Verified against derived address (vault PDA + "solana response key") | Verified against MPC root public key |
 | predecessorId | vault_authority PDA (derived from user's Solana pubkey) | `requester` Canton party ID (authenticated by `controller` requirement) |
-| ETH submission tracking | Relayer posts tx hash on-chain | No on-chain record — MPC monitors Sepolia independently (it knows the expected tx hash from its own signature) |
+| ETH submission tracking | No on-chain record — relayer tracks tx hash off-chain (Redis); MPC monitors Sepolia independently | Same — no on-chain record; MPC computes expected tx hash from its own signature and polls Sepolia |
 | Request ID | `keccak256(encodePacked(sender, rlpTx, caip2Id, ...))` | Same formula — `packParams(evmParams)` replaces RLP as payload, other fields identical |
 
 ## Deposit State Machine
