@@ -105,7 +105,7 @@ Ethereum and triggers the final claim:
 | ----------- | --------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | **Test**    | MPC public key, Sepolia RPC (read-only)       | Erc20Holding (polls at end)           | Derives addresses (signet.js), builds calldata + evmParams, fetches nonce/gas from Sepolia                                                                                         | PendingEvmDeposit (via RequestEvmDeposit)                                        |
 | **MPC**     | MPC root private key, Sepolia RPC (read-only) | PendingEvmDeposit                     | Reads requester (= predecessorId), path, evmParams from PendingEvmDeposit; derives caip2Id from chainId; derives child key, signs EVM tx, polls Sepolia for receipt, signs outcome | EcdsaSignature (via SignEvmTx), EvmTxOutcomeSignature (via ProvideEvmOutcomeSig) |
-| **Relayer** | Sepolia RPC (read+write)                      | EcdsaSignature, EvmTxOutcomeSignature | Reconstructs signed tx from signature + evmParams, submits to Sepolia, triggers claim                                                                                              | Erc20Holding (via ClaimEvmDeposit)                                               |
+| **Relayer** | Sepolia RPC (read+write)                      | EcdsaSignature, EvmTxOutcomeSignature | Fetches PendingEvmDeposit by requestId, reconstructs signed tx from evmParams + signature, submits to Sepolia, triggers claim                                                      | Erc20Holding (via ClaimEvmDeposit)                                               |
 
 The MPC **reads** Sepolia (to verify the ETH tx result) but **never writes** to
 it. Only the relayer submits transactions to Ethereum. The relayer holds **no
@@ -147,7 +147,7 @@ claim. The MPC posts its outputs as evidence contracts on the
 PendingEvmDeposit (anchor — lives until claimed)
     │
     ├── MPC exercises SignEvmTx
-    │   → creates EcdsaSignature (r, s, v + evmParams copy)
+    │   → creates EcdsaSignature (r, s, v)
     │   → MPC computes expected signed tx hash, starts polling Sepolia
     │
     ├── Relayer observes EcdsaSignature
@@ -253,13 +253,11 @@ linked by `requestId`.
 
 ```daml
 -- | MPC's EVM transaction signature. Created by SignEvmTx.
--- Carries evmParams so the relayer can reconstruct the signed tx
--- without needing to look up PendingEvmDeposit separately.
+-- The relayer fetches evmParams from PendingEvmDeposit via requestId.
 template EcdsaSignature
   with
     issuer    : Party
     requestId : BytesHex
-    evmParams : EvmTransactionParams  -- copied from PendingEvmDeposit
     r         : BytesHex              -- 32 bytes
     s         : BytesHex              -- 32 bytes
     v         : Int                   -- recovery id (0 or 1)
@@ -281,15 +279,8 @@ template EvmTxOutcomeSignature
 
 ### Modified: `RequestEvmDeposit` — add `path`, derive `caip2Id`
 
-The caller supplies a `path`. The `requester` party is authenticated by
-Canton's `controller issuer, requester` — both must sign. The MPC reads
-`requester` from the created PendingEvmDeposit and uses it as the
-`predecessorId` for key derivation, ensuring each user gets unique derived
-addresses.
-
-The `caip2Id` is derived on-chain from `evmParams.chainId`:
-`"eip155:" <> chainIdToDecimalText evmParams.chainId`. This mirrors Solana's
-`format!("eip155:{}", tx_params.chain_id)` (`erc20_vault.rs:50`).
+See [`PendingEvmDeposit`](#modified-pendingevmdeposit--add-path-derive-caip2id-erc20vaultdaml)
+for how `requester`, `path`, and `caip2Id` work.
 
 ```daml
 nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
@@ -319,18 +310,14 @@ signs with the derived child key, and posts the signature as `EcdsaSignature`.
 ```daml
 nonconsuming choice SignEvmTx : ContractId EcdsaSignature
   with
-    pendingCid : ContractId PendingEvmDeposit
-    r          : BytesHex
-    s          : BytesHex
-    v          : Int
+    requestId : BytesHex
+    r         : BytesHex
+    s         : BytesHex
+    v         : Int
   controller issuer
   do
-    pending <- fetch pendingCid
     create EcdsaSignature with
-      issuer
-      requestId = pending.requestId
-      evmParams = pending.evmParams
-      r; s; v
+      issuer; requestId; r; s; v
 ```
 
 ### New: `ProvideEvmOutcomeSig` choice
@@ -662,7 +649,7 @@ On PendingEvmDeposit created:
        epsilon = keccak256(derivationPath)
        childKey = (rootPrivateKey + epsilon) mod n
     6. Sign tx hash with child private key → { r, s, v }
-    7. Exercise SignEvmTx(pendingCid, r, s, v)
+    7. Exercise SignEvmTx(requestId, r, s, v)
        → creates EcdsaSignature on Canton
 
   Phase 2: Verify ETH outcome (independent of relayer)
@@ -704,10 +691,11 @@ client/src/relayer/
 
 ```
 On EcdsaSignature created:
-  1. Read: evmParams, r, s, v, requestId
-  2. Reconstruct signed EVM tx from evmParams + signature (viem)
-  3. Submit to Sepolia: eth_sendRawTransaction
-  4. Wait for receipt (poll every 3s, timeout 120s)
+  1. Read: r, s, v, requestId
+  2. Look up PendingEvmDeposit by requestId (query active contracts)
+  3. Reconstruct signed EVM tx from evmParams + signature (viem)
+  4. Submit to Sepolia: eth_sendRawTransaction
+  5. Wait for receipt (poll every 3s, timeout 120s)
 ```
 
 **tx-outcome-handler.ts** — EvmTxOutcomeSignature watcher:
