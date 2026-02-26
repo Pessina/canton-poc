@@ -253,7 +253,6 @@ linked by `requestId`.
 
 ```daml
 -- | MPC's EVM transaction signature. Created by SignEvmTx.
--- The relayer fetches evmParams from PendingEvmDeposit via requestId.
 template EcdsaSignature
   with
     issuer    : Party
@@ -376,7 +375,7 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
 
 ### Modified: `Crypto.daml` — updated `packParams` + new helpers
 
-Remove `EcdsaSignature` data type and `verifyEcdsaSignature` (public key is on
+Remove `MpcSignature` data type and `verifyMpcSignature` (public key is on
 VaultOrchestrator; verification uses `secp256k1WithEcdsaOnly` directly).
 Update `packParams` to match the new generic `EvmTransactionParams` fields,
 and update `computeRequestId` to follow Solana's `getRequestIdBidirectional`
