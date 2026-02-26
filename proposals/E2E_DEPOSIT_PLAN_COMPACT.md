@@ -8,66 +8,66 @@ keys.
 ## Deposit Lifecycle
 
 ```
- Test                Canton                   MPC Service                Relayer                Sepolia
-  │                    │                           │                       │                       │
-  │ RequestEvmDeposit  │                           │                       │                       │
-  │ (evmParams, path)  │                           │                       │                       │
-  ├───────────────────►│                           │                       │                       │
-  │                    │                           │                       │                       │
-  │                    │ PendingEvmDeposit         │                       │                       │
-  │                    │ (path, evmParams,         │                       │                       │
-  │                    │  requester=predId)        │                       │                       │
-  │                    │                           │                       │                       │
-  │                    │     observes Pending      │                       │                       │
-  │                    │──────────────────────────►│                       │                       │
-  │                    │                           │                       │                       │
-  │                    │                           │ buildCalldata         │                       │
-  │                    │                           │ serializeTx           │                       │
-  │                    │                           │ keccak256→txHash      │                       │
-  │                    │                           │ deriveChildKey        │                       │
-  │                    │                           │ sign(txHash)          │                       │
-  │                    │                           │                       │                       │
-  │                    │        SignEvmTx          │                       │                       │
-  │                    │◄──── EcdsaSignature ──────┤                       │                       │
-  │                    │      (r, s, v)            │                       │                       │
-  │                    │                           │                       │                       │
-  │                    │   observes EcdsaSignature │                       │                       │
-  │                    │──────────────────────────────────────────────────►│                       │
-  │                    │                           │                       │                       │
-  │                    │                           │                       │ reconstructTx         │
-  │                    │                           │                       ├──── sendRawTx ───────►│
-  │                    │                           │                       │◄──── receipt ─────────┤
-  │                    │                           │                       │                       │
-  │                    │                           │ polls Sepolia         │                       │
-  │                    │                           │ (knows expected       │                       │
-  │                    │                           │  signed tx hash)      │                       │
-  │                    │                           │                       │                       │
-  │                    │                           ├───── getReceipt ──────┼──────────────────────►│
-  │                    │                           │◄──────────────────────┼───────────────────────┤
-  │                    │                           │                       │                       │
-  │                    │                           │ verify status         │                       │
-  │                    │                           │ sign outcome          │                       │
-  │                    │                           │                       │                       │
-  │                    │   ProvideEvmOutcomeSig    │                       │                       │
-  │                    │◄──── TxOutcomeSig ────────┤                       │                       │
-  │                    │     (DER sig, output)     │                       │                       │
-  │                    │                           │                       │                       │
-  │                    │ observes EvmTxOutcomeSig  │                       │                       │
-  │                    │──────────────────────────────────────────────────►│                       │
-  │                    │                           │                       │                       │
-  │                    │                           │   ClaimEvmDeposit     │                       │
-  │                    │◄──────────────────────────┼── (pendCid,outCid) ───┤                       │
-  │                    │                           │                       │                       │
-  │                    │ verify MPC sig            │                       │                       │
-  │                    │ archive Pending           │                       │                       │
-  │                    │ archive OutcomeSig        │                       │                       │
-  │                    │                           │                       │                       │
-  │                    ├── Erc20Holding            │                       │                       │
-  │                    │                           │                       │                       │
-  │─── poll ──────────►│                           │                       │                       │
-  │◄── Erc20Holding ───┤                           │                       │                       │
-  │  assert balance    │                           │                       │                       │
-  │                    │                           │                       │                       │
+ Test                    Canton                        MPC Service                    Relayer                    Sepolia
+  │                        │                               │                            │                          │
+  │  RequestEvmDeposit     │                               │                            │                          │
+  │  (evmParams, path)     │                               │                            │                          │
+  ├───────────────────────►│                               │                            │                          │
+  │                        │                               │                            │                          │
+  │                        │ creates PendingEvmDeposit     │                            │                          │
+  │                        │ (path, evmParams,             │                            │                          │
+  │                        │  requester = predecessorId)   │                            │                          │
+  │                        │                               │                            │                          │
+  │                        │  observes PendingEvmDeposit   │                            │                          │
+  │                        │──────────────────────────────►│                            │                          │
+  │                        │                               │                            │                          │
+  │                        │                               │ buildCalldata              │                          │
+  │                        │                               │ serializeTx                │                          │
+  │                        │                               │ keccak256 → txHash         │                          │
+  │                        │                               │ deriveChildKey             │                          │
+  │                        │                               │ sign(txHash)               │                          │
+  │                        │                               │                            │                          │
+  │                        │         SignEvmTx             │                            │                          │
+  │                        │◄───── EcdsaSignature ─────────┤                            │                          │
+  │                        │       (r, s, v)               │                            │                          │
+  │                        │                               │                            │                          │
+  │                        │    observes EcdsaSignature    │                            │                          │
+  │                        │───────────────────────────────────────────────────────────►│                          │
+  │                        │                               │                            │                          │
+  │                        │                               │                            │ reconstructSignedTx      │
+  │                        │                               │                            ├── eth_sendRawTx ────────►│
+  │                        │                               │                            │◄── receipt ──────────────┤
+  │                        │                               │                            │                          │
+  │                        │                               │ polls Sepolia              │                          │
+  │                        │                               │ (knows expected            │                          │
+  │                        │                               │  signed tx hash)           │                          │
+  │                        │                               │                            │                          │
+  │                        │                               ├──── getTransactionReceipt ─┼─────────────────────────►│
+  │                        │                               │◄───────────────────────────┼──────────────────────────┤
+  │                        │                               │                            │                          │
+  │                        │                               │ verify receipt.status      │                          │
+  │                        │                               │ sign outcome               │                          │
+  │                        │                               │                            │                          │
+  │                        │  ProvideEvmOutcomeSig         │                            │                          │
+  │                        │◄── EvmTxOutcomeSignature ─────┤                            │                          │
+  │                        │    (DER signature, mpcOutput) │                            │                          │
+  │                        │                               │                            │                          │
+  │                        │ observes EvmTxOutcomeSignature│                            │                          │
+  │                        │───────────────────────────────────────────────────────────►│                          │
+  │                        │                               │                            │                          │
+  │                        │                               │    ClaimEvmDeposit         │                          │
+  │                        │◄──────────────────────────────┼── (pendingCid, outcomeCid)─┤                          │
+  │                        │                               │                            │                          │
+  │                        │ verify MPC signature          │                            │                          │
+  │                        │ archive PendingEvmDeposit     │                            │                          │
+  │                        │ archive EvmTxOutcomeSignature │                            │                          │
+  │                        │                               │                            │                          │
+  │                        ├── creates Erc20Holding        │                            │                          │
+  │                        │                               │                            │                          │
+  │── poll ───────────────►│                               │                            │                          │
+  │◄── Erc20Holding ───────┤                               │                            │                          │
+  │  assert balance        │                               │                            │                          │
+  │                        │                               │                            │                          │
 ```
 
 ## Daml Contracts
