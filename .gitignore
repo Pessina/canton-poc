@@ -8,5 +8,8 @@ log/
 client/node_modules/
 client/generated/
 
+# Secrets
+.env
+
 # OS
 .DS_Store

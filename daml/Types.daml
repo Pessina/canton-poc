@@ -1,62 +1,16 @@
 module Types where
--- Declares this file's module name. In TS the filename is the module implicitly;
--- in Daml the module name is explicit and must match the file path (daml/Types.daml → module Types).
 
-import DA.Crypto.Text (BytesHex, PublicKeyHex, SignatureHex)
--- This is an IMPORT, not an alias. Equivalent to:
--- TS: import { BytesHex, PublicKeyHex, SignatureHex } from "@daml/crypto-text";
--- These types are defined in the Daml SDK. They're opaque newtypes wrapping Text —
--- the compiler treats them as distinct types (you can't mix up a PublicKeyHex with a SignatureHex).
--- TS has no runtime enforcement for this, so the closest equivalent would be branded types:
---   type BytesHex = string & { readonly __brand: "BytesHex" };
---   type PublicKeyHex = string & { readonly __brand: "PublicKeyHex" };
--- This makes them structurally incompatible at compile time, like Daml newtypes.
+import DA.Crypto.Text (BytesHex)
 
--- | Which EVM call the MPC should build from the emitted params.
-data OperationType
-  = Erc20Transfer
-  | Erc20Approve
-  deriving (Eq, Show)
--- This is a sum type (algebraic data type). Each variant is both a type constructor and a value.
--- TS: type OperationType = "Erc20Transfer" | "Erc20Approve";
--- (If variants had fields, this would become a TS discriminated union with objects instead.)
--- `deriving (Eq, Show)`:
---   Eq   → auto-generates (==) and (/=). Without it you CANNOT compare values of this type.
---          In TS, === works on primitives by default — Daml requires you to opt in.
---   Show → auto-generates `show(x)`, a human-readable string (like toString() in TS).
-
--- | Explicit EVM transaction parameters emitted by Canton.
--- The MPC uses these to deterministically build the raw transaction off-chain.
 data EvmTransactionParams = EvmTransactionParams
--- `data EvmTransactionParams = EvmTransactionParams with` does TWO things:
---   1. Defines the TYPE named EvmTransactionParams
---   2. Defines a CONSTRUCTOR also named EvmTransactionParams to create values of that type
--- TS equivalent (type + constructor):
---   interface EvmTransactionParams {
---     erc20Address: string; recipient: string; amount: string; ...
---   }
---   // Plus you need a way to construct it — Daml gets this for free from the data declaration.
---   // You create values with: EvmTransactionParams { erc20Address = "0x...", ... }
   with
-    erc20Address   : BytesHex   -- 20 bytes, target token contract
-    recipient      : BytesHex   -- 20 bytes, destination address
-    amount         : BytesHex   -- 32 bytes, uint256
-    nonce          : BytesHex   -- 32 bytes, uint256
-    gasLimit       : BytesHex   -- 32 bytes, uint256
-    maxFeePerGas   : BytesHex   -- 32 bytes, uint256
-    maxPriorityFee : BytesHex   -- 32 bytes, uint256
-    chainId        : BytesHex   -- 32 bytes, uint256
-    value          : BytesHex   -- 32 bytes, uint256
-    operation      : OperationType
-  deriving (Eq, Show)
--- `with` introduces record fields — like an object/interface body.
--- `deriving (Eq, Show)` same as above — auto-generates equality and string conversion.
-
--- | DER-encoded secp256k1 ECDSA signature + the signer's DER public key.
-data MpcSignature = MpcSignature
--- Same pattern: defines both the type and its constructor.
--- TS: interface MpcSignature { signature: string; publicKey: string; }
-  with
-    signature : SignatureHex
-    publicKey : PublicKeyHex
+    to                : BytesHex   -- 20 bytes, destination address
+    functionSignature : Text       -- e.g., "transfer(address,uint256)"
+    args              : [BytesHex] -- per-arg hex values, canonical width
+    value             : BytesHex   -- 32 bytes, ETH value (usually "00...")
+    nonce             : BytesHex   -- 32 bytes
+    gasLimit          : BytesHex   -- 32 bytes
+    maxFeePerGas      : BytesHex   -- 32 bytes
+    maxPriorityFee    : BytesHex   -- 32 bytes
+    chainId           : BytesHex   -- 32 bytes
   deriving (Eq, Show)

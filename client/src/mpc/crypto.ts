@@ -1,47 +1,95 @@
-import { keccak256, concat, pad, type Hex } from "viem";
+import { keccak256, type Hex } from "viem";
 
 export interface EvmTransactionParams {
-  erc20Address: Hex; // 20 bytes
-  recipient: Hex; // 20 bytes
-  amount: Hex; // 32 bytes (uint256)
-  nonce: Hex; // 32 bytes
-  gasLimit: Hex; // 32 bytes
-  maxFeePerGas: Hex; // 32 bytes
-  maxPriorityFee: Hex; // 32 bytes
-  chainId: Hex; // 32 bytes
-  value: Hex; // 32 bytes
+  to: string; // 20 bytes hex, no 0x
+  functionSignature: string;
+  args: string[]; // hex values, no 0x
+  value: string; // 32 bytes hex, no 0x
+  nonce: string;
+  gasLimit: string;
+  maxFeePerGas: string;
+  maxPriorityFee: string;
+  chainId: string;
 }
 
 /**
- * Pad a hex value to a specific byte size (left-padded with zeros).
- * Mirrors Daml's packHexBytes.
+ * Convert a UTF-8 string to its hex encoding (no 0x prefix).
  */
-function padHex(hex: Hex, size: number): Hex {
-  return pad(hex, { size });
+function textToHex(s: string): string {
+  return Buffer.from(s, "utf8").toString("hex");
 }
 
 /**
- * abi_encode_packed equivalent: concatenate all params at their canonical EVM widths.
+ * Encode a uint32 as 4 bytes hex (no 0x prefix).
+ */
+function uint32ToHex(n: number): string {
+  return n.toString(16).padStart(8, "0");
+}
+
+/**
+ * abi_encode_packed equivalent: concatenate all params at their canonical widths.
  * Mirrors Daml's packParams in Crypto.daml.
+ *
+ * to (20 bytes) + textToHex(functionSignature) + concat(args) + value (32)
+ * + nonce (32) + gasLimit (32) + maxFeePerGas (32) + maxPriorityFee (32) + chainId (32)
  */
-function packParams(p: EvmTransactionParams): Hex {
-  return concat([
-    padHex(p.erc20Address, 20), // address = 20 bytes
-    padHex(p.recipient, 20),
-    padHex(p.amount, 32), // uint256 = 32 bytes
-    padHex(p.nonce, 32),
-    padHex(p.gasLimit, 32),
-    padHex(p.maxFeePerGas, 32),
-    padHex(p.maxPriorityFee, 32),
-    padHex(p.chainId, 32),
-    padHex(p.value, 32),
-  ]);
+export function packParams(p: EvmTransactionParams): string {
+  const to = p.to.padStart(40, "0"); // 20 bytes = 40 hex chars
+  const fnSig = textToHex(p.functionSignature);
+  const args = p.args.join("");
+  const value = p.value.padStart(64, "0");
+  const nonce = p.nonce.padStart(64, "0");
+  const gasLimit = p.gasLimit.padStart(64, "0");
+  const maxFeePerGas = p.maxFeePerGas.padStart(64, "0");
+  const maxPriorityFee = p.maxPriorityFee.padStart(64, "0");
+  const chainId = p.chainId.padStart(64, "0");
+
+  return (
+    to +
+    fnSig +
+    args +
+    value +
+    nonce +
+    gasLimit +
+    maxFeePerGas +
+    maxPriorityFee +
+    chainId
+  );
 }
 
 /**
- * Compute request_id = keccak256(packed params).
- * Mirrors Daml's computeRequestId.
+ * Compute request_id using the full 8-field formula matching
+ * signet.js's getRequestIdBidirectional encodePacked layout.
+ *
+ * encodePacked(
+ *   string sender,
+ *   bytes  payload,
+ *   string caip2Id,
+ *   uint32 keyVersion,
+ *   string path,
+ *   string algo,     // "ECDSA"
+ *   string dest,     // "ethereum"
+ *   string params    // ""
+ * )
  */
-export function computeRequestId(params: EvmTransactionParams): Hex {
-  return keccak256(packParams(params));
+export function computeRequestId(
+  sender: string,
+  evmParams: EvmTransactionParams,
+  caip2Id: string,
+  keyVersion: number,
+  path: string,
+): Hex {
+  const payload = packParams(evmParams);
+
+  const packed =
+    textToHex(sender) +
+    payload +
+    textToHex(caip2Id) +
+    uint32ToHex(keyVersion) +
+    textToHex(path) +
+    textToHex("ECDSA") +
+    textToHex("ethereum");
+  // params = "" -> empty bytes
+
+  return keccak256(`0x${packed}`);
 }

@@ -264,6 +264,10 @@ export async function exerciseChoice(
 // Ledger state & updates
 // ---------------------------------------------------------------------------
 
+/** A single active contracts response item. */
+export type JsGetActiveContractsResponse =
+  components["schemas"]["JsGetActiveContractsResponse"];
+
 /** A single update item from the `POST /v2/updates` response. */
 export type JsGetUpdatesResponse = components["schemas"]["JsGetUpdatesResponse"];
 
@@ -326,4 +330,61 @@ export async function getUpdates(
   });
   if (error) throw new Error(`getUpdates failed: ${JSON.stringify(error)}`);
   return data!;
+}
+
+/**
+ * Query active contracts filtered by template ID via `POST /v2/state/active-contracts`.
+ *
+ * Returns all active (non-archived) contracts matching the given `templateId`
+ * that are visible to at least one of the specified `parties`.
+ *
+ * @param parties - Parties whose visible contracts should be included.
+ * @param templateId - Fully-qualified Daml template identifier
+ *   (e.g. `"Erc20Vault:Erc20Holding"`).
+ * @returns Array of {@link CreatedEvent}s for matching active contracts.
+ * @throws On communication or server errors.
+ *
+ * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | POST /v2/state/active-contracts}
+ */
+export async function getActiveContracts(
+  parties: string[],
+  templateId: string,
+): Promise<CreatedEvent[]> {
+  const ledgerEnd = await getLedgerEnd();
+
+  const filtersByParty: Record<string, components["schemas"]["Filters"]> = {};
+  for (const party of parties) {
+    filtersByParty[party] = {
+      cumulative: [
+        {
+          identifierFilter: {
+            TemplateFilter: {
+              value: { templateId, includeCreatedEventBlob: false },
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  const { data, error } = await client.POST("/v2/state/active-contracts", {
+    body: {
+      activeAtOffset: ledgerEnd,
+      verbose: true,
+      eventFormat: {
+        filtersByParty,
+        verbose: true,
+      },
+    } as components["schemas"]["GetActiveContractsRequest"],
+  });
+  if (error)
+    throw new Error(`getActiveContracts failed: ${JSON.stringify(error)}`);
+
+  const results: CreatedEvent[] = [];
+  for (const item of data ?? []) {
+    if ("JsActiveContract" in item.contractEntry) {
+      results.push(item.contractEntry.JsActiveContract.createdEvent);
+    }
+  }
+  return results;
 }

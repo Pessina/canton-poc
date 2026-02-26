@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { computeRequestId, type EvmTransactionParams } from "../mpc/crypto.js";
+import { computeRequestId, packParams, type EvmTransactionParams } from "../mpc/crypto.js";
 import {
   allocateParty,
   createUser,
@@ -12,15 +12,13 @@ import {
   type Event,
   type CreatedEvent,
 } from "../infra/canton-client.js";
-import {
-  VaultOrchestrator,
-  Erc20Holding,
-} from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
-const USER_BALANCE = Erc20Holding.templateId;
+const MPC_PUB_KEY_SPKI =
+  "3056301006072a8648ce3d020106052b8104000a03420004bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020decddbf6e00192011648d13b1c00af770c0c1bb609d4d3a5c98a43772e0e18ef4";
 
 function getCreatedEvent(event: Event): CreatedEvent | undefined {
   if ("CreatedEvent" in event) return event.CreatedEvent;
@@ -47,40 +45,66 @@ function firstCreatedCid(res: TransactionResponse): string {
   return created.contractId;
 }
 
-// ---------------------------------------------------------------------------
-// Shared test params — must match Daml Test.daml sampleEvmParams exactly
-// ---------------------------------------------------------------------------
 const sampleEvmParams: EvmTransactionParams = {
-  erc20Address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-  recipient: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
-  amount: "0x0000000000000000000000000000000000000000000000000000000005f5e100",
-  nonce: "0x0000000000000000000000000000000000000000000000000000000000000001",
-  gasLimit: "0x000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas: "0x0000000000000000000000000000000000000000000000000000000ba43b7400",
-  maxPriorityFee: "0x0000000000000000000000000000000000000000000000000000000077359400",
-  chainId: "0x0000000000000000000000000000000000000000000000000000000000000001",
-  value: "0x0000000000000000000000000000000000000000000000000000000000000000",
-};
-
-// Daml contract params — same values WITHOUT 0x prefix (Daml uses bare hex)
-const damlEvmParams = {
-  erc20Address: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-  recipient: "d8da6bf26964af9d7eed9e03e53415d37aa96045",
-  amount: "0000000000000000000000000000000000000000000000000000000005f5e100",
+  to: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  functionSignature: "transfer(address,uint256)",
+  args: [
+    "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+    "0000000000000000000000000000000000000000000000000000000005f5e100",
+  ],
+  value: "0000000000000000000000000000000000000000000000000000000000000000",
   nonce: "0000000000000000000000000000000000000000000000000000000000000001",
   gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas: "0000000000000000000000000000000000000000000000000000000ba43b7400",
-  maxPriorityFee: "0000000000000000000000000000000000000000000000000000000077359400",
-  chainId: "0000000000000000000000000000000000000000000000000000000000000001",
-  value: "0000000000000000000000000000000000000000000000000000000000000000",
-  operation: "Erc20Transfer",
+  maxFeePerGas: "00000000000000000000000000000000000000000000000000000001dcd65000",
+  maxPriorityFee: "000000000000000000000000000000000000000000000000000000003b9aca00",
+  chainId: "0000000000000000000000000000000000000000000000000000000000aa36a7",
 };
 
-const TEST_PUB_KEY =
-  "3056301006072a8648ce3d020106052b8104000a034200049b51a3db8f697ac5e49078b01af8d2721dd9a39b81c59bae57d13e5c5d4c915649441be47149b0293b28d8b4a92416045bb39f922329f197fdeed3320c0746a5";
+const SENDER = "Issuer::1220abcdef";
+const CAIP2_ID = "eip155:11155111";
+const KEY_VERSION = 1;
+const PATH = "m/44/60/0/0";
 
 // ---------------------------------------------------------------------------
-// Setup: upload DAR, allocate parties, create user
+// Unit tests: packParams
+// ---------------------------------------------------------------------------
+describe("packParams", () => {
+  it("produces correct byte layout", () => {
+    const packed = packParams(sampleEvmParams);
+
+    expect(packed).toContain(sampleEvmParams.to);
+    expect(packed).toContain(sampleEvmParams.args.join(""));
+    expect(packed).toContain(sampleEvmParams.value);
+    expect(packed).toContain(sampleEvmParams.nonce);
+    expect(packed).toContain(sampleEvmParams.gasLimit);
+    expect(packed).toContain(sampleEvmParams.maxFeePerGas);
+    expect(packed).toContain(sampleEvmParams.maxPriorityFee);
+    expect(packed).toContain(sampleEvmParams.chainId);
+
+    const fnSigHex = Buffer.from(sampleEvmParams.functionSignature, "utf8").toString("hex");
+    expect(packed.startsWith(sampleEvmParams.to + fnSigHex)).toBe(true);
+    expect(packed.endsWith(sampleEvmParams.chainId)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit tests: computeRequestId
+// ---------------------------------------------------------------------------
+describe("computeRequestId", () => {
+  it("is deterministic", () => {
+    const a = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
+    const b = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
+    expect(a).toBe(b);
+  });
+
+  it("produces 32-byte hash", () => {
+    const hash = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
+    expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration tests: Canton
 // ---------------------------------------------------------------------------
 let issuer: string;
 let depositor: string;
@@ -97,16 +121,11 @@ beforeAll(async () => {
   await createUser(ADMIN_USER, issuer, [depositor]);
 }, 30_000);
 
-// ---------------------------------------------------------------------------
-// Cross-runtime request_id
-// ---------------------------------------------------------------------------
 describe("cross-runtime request_id", () => {
-  it("TypeScript request_id matches Canton's request_id from RequestDeposit", async () => {
-    const tsRequestId = computeRequestId(sampleEvmParams);
-
+  it("TypeScript request_id matches Canton's request_id from RequestEvmDeposit", async () => {
     const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
-      mpcPublicKey: TEST_PUB_KEY,
+      mpcPublicKey: MPC_PUB_KEY_SPKI,
     });
     const orchCid = firstCreatedCid(orchResult);
 
@@ -115,32 +134,29 @@ describe("cross-runtime request_id", () => {
       [issuer, depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
-      "RequestDeposit",
+      "RequestEvmDeposit",
       {
         requester: depositor,
-        erc20Address: damlEvmParams.erc20Address,
-        amount: "100000000",
-        evmParams: damlEvmParams,
+        path: PATH,
+        evmParams: sampleEvmParams,
       },
     );
 
-    const pending = findCreated(depositResult, "PendingDeposit");
+    const pending = findCreated(depositResult, "PendingEvmDeposit");
     expect(pending).toBeDefined();
 
     const cantonRequestId = getArgs(pending!).requestId as string;
+    const tsRequestId = computeRequestId(depositor, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
 
     expect(tsRequestId.slice(2)).toBe(cantonRequestId);
   }, 30_000);
 });
 
-// ---------------------------------------------------------------------------
-// Cross-runtime deposit lifecycle
-// ---------------------------------------------------------------------------
-describe("cross-runtime deposit lifecycle", () => {
-  it("deposit creates PendingDeposit with matching requestId", async () => {
+describe("full deposit lifecycle", () => {
+  it("creates PendingEvmDeposit with correct fields", async () => {
     const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
-      mpcPublicKey: TEST_PUB_KEY,
+      mpcPublicKey: MPC_PUB_KEY_SPKI,
     });
     const orchCid = firstCreatedCid(orchResult);
 
@@ -149,66 +165,26 @@ describe("cross-runtime deposit lifecycle", () => {
       [issuer, depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
-      "RequestDeposit",
+      "RequestEvmDeposit",
       {
         requester: depositor,
-        erc20Address: damlEvmParams.erc20Address,
-        amount: "100000000",
-        evmParams: damlEvmParams,
+        path: PATH,
+        evmParams: sampleEvmParams,
       },
     );
 
-    const pending = findCreated(depositResult, "PendingDeposit");
+    const pending = findCreated(depositResult, "PendingEvmDeposit");
     expect(pending).toBeDefined();
     const args = getArgs(pending!);
 
-    expect(args.requestId).toBe(computeRequestId(sampleEvmParams).slice(2));
-    expect(parseFloat(args.amount as string)).toBe(100000000);
-    expect(args.erc20Address).toBe(damlEvmParams.erc20Address);
+    const tsRequestId = computeRequestId(depositor, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
+    expect(args.requestId).toBe(tsRequestId.slice(2));
     expect(args.requester).toBe(depositor);
-  }, 30_000);
-});
+    expect(args.path).toBe(PATH);
+    expect(args.issuer).toBe(issuer);
 
-// ---------------------------------------------------------------------------
-// Cross-runtime withdrawal lifecycle
-// ---------------------------------------------------------------------------
-describe("cross-runtime withdrawal lifecycle", () => {
-  it("withdrawal debits balance and creates PendingWithdrawal with correct requestId", async () => {
-    const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
-      issuer,
-      mpcPublicKey: TEST_PUB_KEY,
-    });
-    const orchCid = firstCreatedCid(orchResult);
-
-    const balResult = await createContract(ADMIN_USER, [issuer], USER_BALANCE, {
-      issuer,
-      owner: depositor,
-      erc20Address: damlEvmParams.erc20Address,
-      amount: "500000000",
-    });
-    const balCid = firstCreatedCid(balResult);
-
-    const withdrawResult = await exerciseChoice(
-      ADMIN_USER,
-      [issuer, depositor],
-      VAULT_ORCHESTRATOR,
-      orchCid,
-      "RequestWithdrawal",
-      {
-        requester: depositor,
-        balanceCid: balCid,
-        recipientAddress: "d8da6bf26964af9d7eed9e03e53415d37aa96045",
-        withdrawAmount: "200000000",
-        evmParams: damlEvmParams,
-      },
-    );
-
-    const pending = findCreated(withdrawResult, "PendingWithdrawal");
-    expect(pending).toBeDefined();
-    expect(getArgs(pending!).requestId).toBe(computeRequestId(sampleEvmParams).slice(2));
-
-    const newBal = findCreated(withdrawResult, "Erc20Holding");
-    expect(newBal).toBeDefined();
-    expect(parseFloat(getArgs(newBal!).amount as string)).toBe(300000000);
+    const evmParamsResult = args.evmParams as Record<string, unknown>;
+    expect(evmParamsResult.to).toBe(sampleEvmParams.to);
+    expect(evmParamsResult.functionSignature).toBe(sampleEvmParams.functionSignature);
   }, 30_000);
 });

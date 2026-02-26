@@ -1,91 +1,68 @@
 module Crypto where
--- TS: // crypto.ts
 
 import DA.Optional (fromSome)
--- `Optional T` in Daml is a tagged union: Some(value) or None. NOT the same as nullable.
--- TS equivalent: type Optional<T> = { tag: "Some"; value: T } | { tag: "None" };
--- `fromSome` extracts the value from Some(x), aborts the transaction on None.
--- TS: function fromSome<T>(opt: Optional<T>): T {
---       if (opt.tag === "None") throw new Error("fromSome: None");
---       return opt.value;
---     }
+import qualified DA.Text
 
 import DA.Crypto.Text
   ( BytesHex
   , keccak256
-  , secp256k1WithEcdsaOnly
   , packHexBytes
+  , toHex
+  , fromHex
   )
--- TS: import { keccak256 as keccak256Bytes } from "ethereum-cryptography/keccak";
--- NOTE: The TS library takes/returns Uint8Array, but Daml's keccak256 takes/returns hex strings.
--- In TS you'd need a wrapper: keccak256(hex) = toHex(keccak256Bytes(fromHex(hex)))
---
--- TS: import { verify } from "ethereum-cryptography/secp256k1";
--- NOTE: The TS verify() takes (msgHash: Uint8Array, sig: Uint8Array, pubKey: Uint8Array).
--- Daml's secp256k1WithEcdsaOnly takes hex strings in order (signature, message, publicKey).
--- The argument order differs: TS is (message, signature, publicKey).
---
--- packHexBytes: no TS equivalent — left-pads/truncates hex to a target byte width.
--- Returns Optional BytesHex (Some on success, None on invalid input).
 
-import Types (EvmTransactionParams(..), MpcSignature(..))
--- TS: import { EvmTransactionParams, MpcSignature } from "./types";
--- (..) imports the type AND all its data constructors (e.g., the EvmTransactionParams constructor
--- used for pattern matching and record construction). Field accessors work via dot notation
--- regardless of (..). TS has no direct equivalent — `import { EvmTransactionParams }` is closest.
+import Types (EvmTransactionParams(..))
 
 -- | Pad a hex value to the given byte width. Aborts on invalid input.
 padHex : BytesHex -> Int -> BytesHex
--- TS: function padHex(hex: string, width: number): string
--- Type signature. `->` is right-associative: `BytesHex -> Int -> BytesHex` means
--- `BytesHex -> (Int -> BytesHex)` — a function taking BytesHex, returning a function
--- taking Int, returning BytesHex. The last type is conventionally read as the return type.
--- All Daml functions are curried: you can partially apply, e.g. `padHex "ff"` returns a function.
 padHex hex width = fromSome (packHexBytes hex width)
--- packHexBytes returns Optional BytesHex (like string | null in TS).
--- fromSome unwraps it, aborting the transaction if it's None.
--- TS: {
---   const result = packHexBytes(hex, width);  // returns string | null
---   if (result == null) throw new Error("packHexBytes returned None");
---   return result;
--- }
 
--- | abi_encode_packed equivalent: concatenate all params at their canonical EVM widths.
--- Matches the field ordering the MPC expects.
+-- | Convert Text to hex-encoded UTF-8 bytes.
+textToHex : Text -> BytesHex
+textToHex = toHex
+
+-- | Convert an Int to 4-byte (8 hex char) big-endian representation.
+uint32ToHex : Int -> BytesHex
+uint32ToHex n = fromSome (packHexBytes (toHex n) 4)
+
+-- | Ensure hex string has even length (required by fromHex / packHexBytes).
+ensureEvenHex : BytesHex -> BytesHex
+ensureEvenHex hex =
+  if DA.Text.length hex % 2 == 1 then "0" <> hex else hex
+
+-- | Convert hex chainId to decimal text (e.g., "aa36a7" -> "11155111").
+chainIdToDecimalText : BytesHex -> Text
+chainIdToDecimalText hex =
+  let val : Optional Int = fromHex (ensureEvenHex hex)
+  in show (fromSome val)
+
+-- | abi_encode_packed: concatenate all EVM params at canonical widths.
 packParams : EvmTransactionParams -> BytesHex
--- TS: function packParams(p: EvmTransactionParams): string
 packParams p =
-  padHex p.erc20Address   20  -- address  = 20 bytes
-    <> padHex p.recipient      20
-    <> padHex p.amount         32  -- uint256  = 32 bytes
+  padHex p.to 20
+    <> toHex p.functionSignature
+    <> foldl (\acc a -> acc <> a) "" p.args
+    <> padHex p.value          32
     <> padHex p.nonce          32
     <> padHex p.gasLimit       32
     <> padHex p.maxFeePerGas   32
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
-    <> padHex p.value          32
--- TS: { return padHex(p.erc20Address, 20) + padHex(p.recipient, 20) + padHex(p.amount, 32) + ... }
--- `<>` is semigroup append — for hex/strings it's concatenation (TS: `+`).
--- `p.erc20Address` is record field access, same as TS dot notation.
 
--- | Compute request_id = keccak256(packed params).
-computeRequestId : EvmTransactionParams -> BytesHex
--- TS: function computeRequestId(p: EvmTransactionParams): string
-computeRequestId = keccak256 . packParams
--- TS: { return keccak256(packParams(p)); }
--- `.` is function composition: (f . g)(x) = f(g(x)). Point-free style — argument is implicit.
+-- | Compute request_id per signet.js 8-field layout.
+computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> BytesHex
+computeRequestId sender evmParams caip2Id keyVersion path =
+  let payload = packParams evmParams
+  in keccak256
+    ( toHex sender
+      <> payload
+      <> toHex caip2Id
+      <> uint32ToHex keyVersion
+      <> toHex path
+      <> toHex "ECDSA"
+      <> toHex "ethereum"
+    )
 
 -- | Compute response_hash = keccak256(request_id || serialized_output).
 computeResponseHash : BytesHex -> BytesHex -> BytesHex
--- TS: function computeResponseHash(requestId: string, output: string): string
 computeResponseHash requestId output = keccak256 (requestId <> output)
--- TS: { return keccak256(requestId + output); }
-
--- | Verify an MPC signature over a message using secp256k1 ECDSA (no extra hashing).
-verifyMpcSignature : MpcSignature -> BytesHex -> Bool
--- TS: function verifyMpcSignature(sig: MpcSignature, msg: string): boolean
-verifyMpcSignature sig msg =
-  secp256k1WithEcdsaOnly sig.signature msg sig.publicKey
--- Daml built-in: raw ECDSA verification (no extra hashing). Takes (signature, message, pubkey).
--- TS: { return verify(fromHex(msg), fromHex(sig.signature), fromHex(sig.publicKey)); }
--- NOTE: TS verify() arg order is (message, signature, publicKey) — differs from Daml.
