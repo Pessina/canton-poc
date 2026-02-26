@@ -36,52 +36,68 @@ The MPC posts signatures to separate templates; the relayer submits to
 Ethereum and triggers the final claim:
 
 ```
-Test              Canton              MPC Service         Relayer           Sepolia
- │                  │                     │                  │                │
- ├─RequestDeposit──►│                     │                  │                │
- │  (evmParams,     │                     │                  │                │
- │   path, caip2Id) │ PendingDeposit      │                  │                │
- │                  │ (path, caip2Id,     │                  │                │
- │                  │  requester=predId)  │                  │                │
- │                  │                     │                  │                │
- │                  │   observes Pending  │                  │                │
- │                  │                    ►│                  │                │
- │                  │   RLP(evmParams)    │                  │                │
- │                  │   → keccak256       │                  │                │
- │                  │   → sign(childKey)  │                  │                │
- │                  │                     │                  │                │
- │                  │   SignEvmTx         │                  │                │
- │                  │◄── MpcSignature ───┤                  │                │
- │                  │    (r, s, v)        │                  │                │
- │                  │                     │                  │                │
- │                  │   observes Sig     ────────────────────►│                │
- │                  │                     │                  │                │
- │                  │                     │                  ├─sendRawTx─────►│
- │                  │                     │                  │◄──receipt──────┤
- │                  │                     │                  │                │
- │                  │   MPC independently │                  │                │
- │                  │   polls Sepolia for │                  │                │
- │                  │   the signed tx     │                  │                │
- │                  │   (it knows the     │                  │                │
- │                  │   expected hash)    │                  │                │
- │                  │                    ►│                  │                │
- │                  │                     ├──getReceipt────────────────────►│
- │                  │                     │◄───────────────────────────────┤
- │                  │                     │                  │                │
- │                  │ ProvideOutcomeSig   │                  │                │
- │                  │◄ TxOutcomeSignature┤                  │                │
- │                  │   (DER sig)         │                  │                │
- │                  │                     │                  │                │
- │                  │   observes Outcome ────────────────────►│                │
- │                  │                     │                  │                │
- │                  │   ClaimDeposit(pendingCid, outcomeCid)  │                │
- │                  │◄──────────────────────────────────────┤                │
- │                  │   verifies MPC sig on-chain            │                │
- │                  │   archives Pending + Outcome           │                │
- │                  ├─Erc20Holding       │                  │                │
- │                  │                     │                  │                │
- │◄─poll───────────┤                     │                  │                │
- │  assert balance  │                     │                  │                │
+Test                 Canton                   MPC Service                  Relayer                  Sepolia
+  │                    │                          │                          │                        │
+  │  RequestDeposit    │                          │                          │                        │
+  ├───(evmParams,─────►│                          │                          │                        │
+  │    path, caip2Id)  │                          │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │  PendingDeposit           │                          │                        │
+  │                    │  (path, caip2Id,          │                          │                        │
+  │                    │   requester=predId)       │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │          observes Pending │                          │                        │
+  │                    │─────────────────────────►│                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │  buildCalldata(sig, args) │                        │
+  │                    │                          │  serializeTx(evmParams)   │                        │
+  │                    │                          │  → keccak256 → txHash    │                        │
+  │                    │                          │  deriveChildKey(requester,│                        │
+  │                    │                          │    path, caip2Id)         │                        │
+  │                    │                          │  sign(txHash, childKey)   │                        │
+  │                    │                          │                          │                        │
+  │                    │              SignEvmTx    │                          │                        │
+  │                    │◄─── MpcSignature(r,s,v) ─┤                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │          observes MpcSig  │                        │
+  │                    │──────────────────────────┼─────────────────────────►│                        │
+  │                    │                          │                          │                        │
+  │                    │                          │                          │  reconstructSignedTx    │
+  │                    │                          │                          ├──── sendRawTx ────────►│
+  │                    │                          │                          │◄──── receipt ─────────┤
+  │                    │                          │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │  polls Sepolia for the    │                        │
+  │                    │                          │  signed tx it produced    │                        │
+  │                    │                          │  (knows expected hash)    │                        │
+  │                    │                          │                          │                        │
+  │                    │                          ├───────── getReceipt ─────┼───────────────────────►│
+  │                    │                          │◄────────────────────────┼────────────────────────┤
+  │                    │                          │                          │                        │
+  │                    │                          │  verify receipt.status    │                        │
+  │                    │                          │  sign outcome (DER)       │                        │
+  │                    │                          │                          │                        │
+  │                    │        ProvideOutcomeSig  │                          │                        │
+  │                    │◄── TxOutcomeSignature ───┤                          │                        │
+  │                    │        (DER sig, output)  │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │                          │                        │
+  │                    │                          │        observes Outcome   │                        │
+  │                    │──────────────────────────┼─────────────────────────►│                        │
+  │                    │                          │                          │                        │
+  │                    │                          │  ClaimDeposit             │                        │
+  │                    │◄─────────────────────────┼── (pendingCid, outCid) ──┤                        │
+  │                    │                          │                          │                        │
+  │                    │  verify MPC sig on-chain  │                          │                        │
+  │                    │  archive Pending + Outcome│                          │                        │
+  │                    │                          │                          │                        │
+  │                    ├─ Erc20Holding             │                          │                        │
+  │                    │                          │                          │                        │
+  │◄── poll ──────────┤                          │                          │                        │
+  │    assert balance  │                          │                          │                        │
+  │                    │                          │                          │                        │
 ```
 
 ### Actor Responsibilities
@@ -119,7 +135,7 @@ signature.
 | Response key | Verified against derived address (vault PDA + "solana response key") | Verified against MPC root public key |
 | predecessorId | vault_authority PDA (derived from user's Solana pubkey) | `requester` Canton party ID (authenticated by `controller` requirement) |
 | ETH submission tracking | Relayer posts tx hash on-chain | No on-chain record — MPC monitors Sepolia independently (it knows the expected tx hash from its own signature) |
-| Request ID | `keccak256(encodePacked(sender, rlpTx, caip2Id, ...))` | `keccak256(packParams(evmParams))` — simpler, already cross-runtime tested |
+| Request ID | `keccak256(encodePacked(sender, rlpTx, caip2Id, ...))` | Same formula — `packParams(evmParams)` replaces RLP as payload, other fields identical |
 
 ## Deposit State Machine
 
@@ -228,18 +244,20 @@ derivation to use (e.g., `"eip155:11155111"` for Sepolia).
 ```daml
 template PendingDeposit
   with
-    issuer       : Party
-    requester    : Party        -- MPC uses as predecessorId for key derivation
-    erc20Address : BytesHex
-    amount       : Decimal
-    requestId    : BytesHex
-    path         : Text         -- user-supplied derivation sub-path
-    caip2Id      : Text         -- chain identifier (e.g., "eip155:11155111")
-    evmParams    : EvmTransactionParams
+    issuer    : Party
+    requester : Party        -- MPC uses as predecessorId for key derivation
+    requestId : BytesHex
+    path      : Text         -- user-supplied derivation sub-path
+    caip2Id   : Text         -- chain identifier (e.g., "eip155:11155111")
+    evmParams : EvmTransactionParams
   where
     signatory issuer
     observer requester
 ```
+
+`erc20Address` and `amount` are not stored — they're already in `evmParams`
+(`evmParams.to` = ERC20 contract, `evmParams.args !! 1` = amount). The
+`Erc20Holding` created at claim time extracts these from `evmParams`.
 
 ### New: Evidence templates on VaultOrchestrator (Erc20Vault.daml)
 
@@ -285,18 +303,21 @@ derived addresses.
 ```daml
 nonconsuming choice RequestDeposit : ContractId PendingDeposit
   with
-    requester    : Party
-    erc20Address : BytesHex
-    amount       : Decimal
-    path         : Text
-    caip2Id      : Text
-    evmParams    : EvmTransactionParams
+    requester : Party
+    path      : Text
+    caip2Id   : Text
+    evmParams : EvmTransactionParams
   controller issuer, requester
   do
-    let requestId = computeRequestId evmParams
+    let sender = partyToText requester
+    let requestId = computeRequestId sender evmParams caip2Id 1 path
     create PendingDeposit with
-      issuer; requester; erc20Address; amount; requestId; path; caip2Id; evmParams
+      issuer; requester; requestId; path; caip2Id; evmParams
 ```
+
+`keyVersion = 1` is hardcoded (same as Solana's current version). `algo`,
+`dest`, `params` are hardcoded inside `computeRequestId` (`"ECDSA"`,
+`"ethereum"`, `""`).
 
 ### New: `SignEvmTx` choice
 
@@ -347,6 +368,7 @@ nonconsuming choice ClaimDeposit : ContractId Erc20Holding
   with
     pendingCid  : ContractId PendingDeposit
     outcomeCid  : ContractId TxOutcomeSignature
+    amount      : Decimal     -- caller provides (hex→Decimal conversion off-chain)
   controller issuer
   do
     pending <- fetch pendingCid
@@ -368,21 +390,21 @@ nonconsuming choice ClaimDeposit : ContractId Erc20Holding
     create Erc20Holding with
       issuer
       owner        = pending.requester
-      erc20Address = pending.erc20Address
-      amount       = pending.amount
+      erc20Address = (pending.evmParams).to    -- ERC20 contract address
+      amount                                   -- from caller (matches args !! 1)
 ```
 
 ### Modified: `Crypto.daml` — updated types + `packParams`
 
 Rename `MpcSignature` → `EcdsaSignature` throughout. Update `packParams`
-to match the new generic `EvmTransactionParams` fields. The `args` list is
-concatenated directly (each arg is already at its canonical ABI width).
-
-`functionSignature` (Text) is not included in `packParams` — Daml's `keccak256`
-operates on `BytesHex`, not `Text`. The nonce ensures request ID uniqueness
-per sender, and the args capture the call-specific data.
+to match the new generic `EvmTransactionParams` fields, and update
+`computeRequestId` to follow Solana's `getRequestIdBidirectional` formula
+with `packParams` replacing the RLP payload.
 
 ```daml
+-- | abi_encode_packed equivalent for EVM transaction fields.
+-- Replaces the RLP payload in Solana's getRequestIdBidirectional.
+packParams : EvmTransactionParams -> BytesHex
 packParams p =
   padHex p.to 20
     <> foldl (<>) "" p.args       -- concatenated args (variable length)
@@ -392,6 +414,31 @@ packParams p =
     <> padHex p.maxFeePerGas   32
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
+
+-- | Convert Text to hex-encoded UTF-8 bytes.
+-- e.g., "ECDSA" → "4543445341"
+textToHex : Text -> BytesHex
+
+-- | Convert Int to 4-byte big-endian hex. e.g., 1 → "00000001"
+uint32ToHex : Int -> BytesHex
+
+-- | Request ID = keccak256(encodePacked(sender, payload, caip2Id,
+-- keyVersion, path, algo, dest, params)).
+-- Same formula as Solana's getRequestIdBidirectional, with
+-- packParams(evmParams) replacing the RLP-encoded tx as payload.
+computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> BytesHex
+computeRequestId sender evmParams caip2Id keyVersion path =
+  let payload = packParams evmParams
+  in keccak256
+    ( textToHex sender
+      <> payload
+      <> textToHex caip2Id
+      <> uint32ToHex keyVersion
+      <> textToHex path
+      <> textToHex "ECDSA"
+      <> textToHex "ethereum"
+      -- params = "" → empty bytes, nothing to append
+    )
 
 verifyEcdsaSignature : EcdsaSignature -> BytesHex -> Bool
 verifyEcdsaSignature sig msg =
@@ -653,7 +700,8 @@ On MpcSignature created:
 On TxOutcomeSignature created:
   1. Read: requestId, contractId
   2. Look up PendingDeposit by requestId (query active contracts)
-  3. Exercise ClaimDeposit(pendingCid, outcomeCid)
+  3. Decode amount from PendingDeposit's evmParams.args[1] (hex → Decimal)
+  4. Exercise ClaimDeposit(pendingCid, outcomeCid, amount)
      → verifies MPC sig on-chain, creates Erc20Holding
 ```
 
@@ -711,8 +759,7 @@ describe("E2E ERC20 Deposit Flow", () => {
 
     // Step 4: Exercise RequestDeposit on Canton
     await exerciseChoice(..., "RequestDeposit", {
-      requester: depositor, erc20Address: ERC20_ADDRESS,
-      amount: depositAmount, path: userPath,
+      requester: depositor, path: userPath,
       caip2Id: "eip155:11155111", evmParams,
     });
 
@@ -722,9 +769,9 @@ describe("E2E ERC20 Deposit Flow", () => {
     const holding = await pollForContract("Erc20Holding", depositor, 180_000);
 
     // Step 6: Assert final state
-    expect(holding.amount).toBe(depositAmount);
     expect(holding.owner).toBe(depositor);
-    expect(holding.erc20Address).toBe(erc20Address);
+    expect(holding.erc20Address).toBe(ERC20_ADDRESS);
+    expect(holding.amount).toBe(depositAmount);
   }, 180_000);  // 3 min timeout for Sepolia confirmation
 });
 ```
@@ -741,7 +788,8 @@ canton-mpc-poc/
 │   ├── Types.daml                   MODIFY: generic EvmTransactionParams,
 │   │                                        rename MpcSignature → EcdsaSignature,
 │   │                                        remove OperationType
-│   ├── Crypto.daml                  MODIFY: updated packParams + rename
+│   ├── Crypto.daml                  MODIFY: updated packParams, computeRequestId
+│   │                                        (signet.js formula), rename, add helpers
 │   └── Test.daml                    UPDATE: new EvmTransactionParams fields + path
 │
 ├── client/
@@ -754,7 +802,7 @@ canton-mpc-poc/
 │   │   │   ├── canton-client.ts              EXTEND: getActiveContracts
 │   │   │   └── ledger-stream.ts              unchanged
 │   │   ├── mpc/
-│   │   │   ├── crypto.ts                     MODIFY: update EvmTransactionParams interface
+│   │   │   ├── crypto.ts                     MODIFY: update EvmTransactionParams, use signet.js getRequestIdBidirectional
 │   │   │   └── address-derivation.ts         NEW: wraps signet.js deriveChildPublicKey
 │   │   ├── mpc-service/
 │   │   │   ├── index.ts                      NEW: MPC service entry point
@@ -802,7 +850,7 @@ canton-mpc-poc/
 
 | # | Phase | Depends On | Scope |
 |---|-------|-----------|-------|
-| 1 | Daml: generic EvmTransactionParams, EcdsaSignature rename, evidence templates, new choices, modify RequestDeposit + ClaimDeposit | — | ~100 lines |
+| 1 | Daml: generic EvmTransactionParams, EcdsaSignature rename, signet.js-aligned computeRequestId + helpers, evidence templates, new choices, modify RequestDeposit + ClaimDeposit | — | ~120 lines |
 | 2 | Rebuild DAR + codegen (`dpm build && dpm codegen-js ...`) | 1 | — |
 | 3 | Address derivation module + tests (wraps signet.js) | — | ~50 lines |
 | 4 | EVM tx builder (generic EIP-1559, viem) | — | ~120 lines |
@@ -875,10 +923,40 @@ signature, and submits via `eth_sendRawTransaction`.
 
 ### Request ID
 
-`computeRequestId = keccak256(packParams(evmParams))` — consistent between
-TypeScript and Daml, already cross-runtime tested. Simpler than Solana's
-`getRequestIdBidirectional` format. Uniqueness is guaranteed by the nonce
-field (unique per sender address).
+Same formula as Solana's `getRequestIdBidirectional`, with `packParams(evmParams)`
+replacing the RLP-encoded payload:
+
+```
+requestId = keccak256(encodePacked(
+  sender,                    // partyToText requester (string)
+  packParams(evmParams),     // packed tx fields (bytes) — replaces RLP
+  caip2Id,                   // "eip155:11155111" (string)
+  keyVersion,                // 1 (uint32)
+  path,                      // user-supplied (string)
+  "ECDSA",                   // algo (string)
+  "ethereum",                // dest (string)
+  ""                         // params (string, empty)
+))
+```
+
+On the TypeScript side, this leverages `signet.js` directly:
+```typescript
+import { getRequestIdBidirectional } from "signet.js";
+
+const requestId = getRequestIdBidirectional({
+  sender: requesterParty,
+  payload: hexToBytes(packParams(evmParams)),  // packParams replaces RLP
+  caip2Id: "eip155:11155111",
+  keyVersion: 1,
+  path: userPath,
+  algo: "ECDSA",
+  dest: "ethereum",
+  params: "",
+});
+```
+
+On the Daml side, `computeRequestId` implements the same `encodePacked` logic
+with `textToHex` and `uint32ToHex` helpers (see Crypto.daml section).
 
 ### MPC Response Signature
 
@@ -944,8 +1022,7 @@ fields and pass `path` in `RequestDeposit` calls:
   {
     requester: depositor,
 -   erc20Address: damlEvmParams.erc20Address,
-+   erc20Address: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-    amount: "100000000",
+-   amount: "100000000",
 +   path: "test-depositor",
 +   caip2Id: "eip155:11155111",
     evmParams: damlEvmParams,
