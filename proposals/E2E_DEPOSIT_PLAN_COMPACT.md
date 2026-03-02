@@ -21,65 +21,64 @@ wrapped ERC-20 balance.
 ## Deposit Lifecycle
 
 ```
- User                       Canton                        MPC Service                    Sepolia
-  |                            |                               |                            |
-  |  RequestEvmDeposit         |                               |                            |
-  |  (evmParams, path)         |                               |                            |
-  |--------------------------->|                               |                            |
-  |                            |                               |                            |
-  |                            | creates PendingEvmDeposit     |                            |
-  |                            | (path, evmParams,             |                            |
-  |                            |  requester = predecessorId)   |                            |
-  |                            |                               |                            |
-  |                            |  observes PendingEvmDeposit   |                            |
-  |                            |------------------------------>|                            |
-  |                            |                               |                            |
-  |                            |                               | buildCalldata              |
-  |                            |                               | serializeTx                |
-  |                            |                               | keccak256 -> txHash        |
-  |                            |                               | deriveChildKey             |
-  |                            |                               | sign(txHash)               |
-  |                            |                               |                            |
-  |                            |         SignEvmTx             |                            |
-  |                            |<----- EcdsaSignature ---------|                            |
-  |                            |       (r, s, v)               |                            |
-  |                            |                               |                            |
-  |   observes EcdsaSignature  |                               |                            |
-  |<---------------------------|                               |                            |
-  |                            |                               |                            |
-  | reconstructSignedTx        |                               |                            |
-  |-- eth_sendRawTx ----------------------------------------------------------------------->|
-  |<-- receipt -----------------------------------------------------------------------------|
-  |                            |                               |                            |
-  |                            |                               | polls Sepolia              |
-  |                            |                               | (knows expected            |
-  |                            |                               |  signed tx hash)           |
-  |                            |                               |                            |
-  |                            |                               |--- getTransactionReceipt ->|
-  |                            |                               |<---------------------------|
-  |                            |                               |                            |
-  |                            |                               | verify receipt.status      |
-  |                            |                               | sign outcome               |
-  |                            |                               |                            |
-  |                            |  ProvideEvmOutcomeSig         |                            |
-  |                            |<-- EvmTxOutcomeSignature -----|                            |
-  |                            |    (DER signature, mpcOutput) |                            |
-  |                            |                               |                            |
-  | observes EvmTxOutcomeSignature                             |                            |
-  |<---------------------------|                               |                            |
-  |                            |                               |                            |
-  |   ClaimEvmDeposit          |                               |                            |
-  |-- (pendingCid, outcomeCid)-->                              |                            |
-  |                            |                               |                            |
-  |                            | verify MPC signature          |                            |
-  |                            | archive PendingEvmDeposit     |                            |
-  |                            | archive EvmTxOutcomeSignature |                            |
-  |                            |                               |                            |
-  |                            |-- creates Erc20Holding        |                            |
-  |                            |                               |                            |
-  |<-- Erc20Holding -----------|                               |                            |
-  |  assert balance            |                               |                            |
-  |                            |                               |                            |
+  User                                            Canton                                          MPC Service                                     Sepolia
+  |                                               |                                               |                                               |
+  | RequestEvmDeposit                             |                                               |                                               |
+  | (evmParams, path)                             |                                               |                                               |
+  |---------------------------------------------->|                                               |                                               |
+  |                                               |                                               |                                               |
+  |                                               | creates PendingEvmDeposit                     |                                               |
+  |                                               | (path, evmParams,                             |                                               |
+  |                                               |  requester = predecessorId)                   |                                               |
+  |                                               |                                               |                                               |
+  |                                               | observes PendingEvmDeposit                    |                                               |
+  |                                               |---------------------------------------------->|                                               |
+  |                                               |                                               |                                               |
+  |                                               |                                               | buildCalldata                                 |
+  |                                               |                                               | serializeTx                                   |
+  |                                               |                                               | keccak256 -> txHash                           |
+  |                                               |                                               | deriveChildKey                                |
+  |                                               |                                               | sign(txHash)                                  |
+  |                                               |                                               |                                               |
+  |                                               | SignEvmTx                                     |                                               |
+  |                                               |<-------------- EcdsaSignature ----------------|                                               |
+  |                                               | (r, s, v)                                     |                                               |
+  |                                               |                                               |                                               |
+  | observes EcdsaSignature                       |                                               |                                               |
+  |<----------------------------------------------|                                               |                                               |
+  |                                               |                                               |                                               |
+  | reconstructSignedTx                           |                                               |                                               |
+  |----------------------------------------------------------- eth_sendRawTransaction ----------------------------------------------------------->|
+  |<------------------------------------------------------------------ receipt -------------------------------------------------------------------|
+  |                                               |                                               |                                               |
+  |                                               |                                               | polls Sepolia                                 |
+  |                                               |                                               | (knows expected signed tx hash)               |
+  |                                               |                                               |                                               |
+  |                                               |                                               |------------ getTransactionReceipt ----------->|
+  |                                               |                                               |<----------------------------------------------|
+  |                                               |                                               |                                               |
+  |                                               |                                               | verify receipt.status                         |
+  |                                               |                                               | sign outcome                                  |
+  |                                               |                                               |                                               |
+  |                                               | ProvideEvmOutcomeSig                          |                                               |
+  |                                               |<----------- EvmTxOutcomeSignature ------------|                                               |
+  |                                               | (DER signature, mpcOutput)                    |                                               |
+  |                                               |                                               |                                               |
+  | observes EvmTxOutcomeSignature                |                                               |                                               |
+  |<----------------------------------------------|                                               |                                               |
+  |                                               |                                               |                                               |
+  | ClaimEvmDeposit                               |                                               |                                               |
+  |----------- pendingCid, outcomeCid ----------->|                                               |                                               |
+  |                                               |                                               |                                               |
+  |                                               | verify MPC signature                          |                                               |
+  |                                               | archive PendingEvmDeposit                     |                                               |
+  |                                               | archive EvmTxOutcomeSignature                 |                                               |
+  |                                               |                                               |                                               |
+  |                                               | creates Erc20Holding                          |                                               |
+  |                                               |                                               |                                               |
+  |<--------------- Erc20Holding -----------------|                                               |                                               |
+  | assert balance                                |                                               |                                               |
+  |                                               |                                               |                                               |
 ```
 
 ## Daml Contracts
