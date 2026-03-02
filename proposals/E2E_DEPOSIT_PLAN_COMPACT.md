@@ -25,14 +25,14 @@ wrapped ERC-20 balance.
   |                            |                               |                            |
   |  RequestEvmDeposit         |                               |                            |
   |  (evmParams, path)         |                               |                            |
-  |----------------------------->                               |                            |
+  |--------------------------->|                               |                            |
   |                            |                               |                            |
   |                            | creates PendingEvmDeposit     |                            |
   |                            | (path, evmParams,             |                            |
   |                            |  requester = predecessorId)   |                            |
   |                            |                               |                            |
   |                            |  observes PendingEvmDeposit   |                            |
-  |                            |------------------------------->                            |
+  |                            |------------------------------>|                            |
   |                            |                               |                            |
   |                            |                               | buildCalldata              |
   |                            |                               | serializeTx                |
@@ -41,32 +41,32 @@ wrapped ERC-20 balance.
   |                            |                               | sign(txHash)               |
   |                            |                               |                            |
   |                            |         SignEvmTx             |                            |
-  |                            |<----- EcdsaSignature ---------+                            |
+  |                            |<----- EcdsaSignature ---------|                            |
   |                            |       (r, s, v)               |                            |
   |                            |                               |                            |
   |   observes EcdsaSignature  |                               |                            |
-  |<---------------------------+                               |                            |
+  |<---------------------------|                               |                            |
   |                            |                               |                            |
   | reconstructSignedTx        |                               |                            |
-  +-- eth_sendRawTx ----------------------------------------------------->                  |
-  |<-- receipt ---------------------------------------------------------------+             |
+  |-- eth_sendRawTx ----------------------------------------------------------------------->|
+  |<-- receipt -----------------------------------------------------------------------------|
   |                            |                               |                            |
   |                            |                               | polls Sepolia              |
   |                            |                               | (knows expected            |
   |                            |                               |  signed tx hash)           |
   |                            |                               |                            |
-  |                            |                               +--- getTransactionReceipt ->|
-  |                            |                               |<--------------------------+|
+  |                            |                               |--- getTransactionReceipt ->|
+  |                            |                               |<---------------------------|
   |                            |                               |                            |
   |                            |                               | verify receipt.status      |
   |                            |                               | sign outcome               |
   |                            |                               |                            |
   |                            |  ProvideEvmOutcomeSig         |                            |
-  |                            |<-- EvmTxOutcomeSignature -----+                            |
+  |                            |<-- EvmTxOutcomeSignature -----|                            |
   |                            |    (DER signature, mpcOutput) |                            |
   |                            |                               |                            |
   | observes EvmTxOutcomeSignature                             |                            |
-  |<---------------------------+                               |                            |
+  |<---------------------------|                               |                            |
   |                            |                               |                            |
   |   ClaimEvmDeposit          |                               |                            |
   |-- (pendingCid, outcomeCid)-->                              |                            |
@@ -75,9 +75,9 @@ wrapped ERC-20 balance.
   |                            | archive PendingEvmDeposit     |                            |
   |                            | archive EvmTxOutcomeSignature |                            |
   |                            |                               |                            |
-  |                            +-- creates Erc20Holding        |                            |
+  |                            |-- creates Erc20Holding        |                            |
   |                            |                               |                            |
-  |<-- Erc20Holding -----------+                               |                            |
+  |<-- Erc20Holding -----------|                               |                            |
   |  assert balance            |                               |                            |
   |                            |                               |                            |
 ```
