@@ -47,6 +47,7 @@
     "@daml/types": "^3.4.11",
     "@mojotech/json-type-validation": "^3.1.0",
     "@noble/curves": "^2.0.1",
+    "dotenv": "^17.3.1",
     "openapi-fetch": "^0.17.0",
     "signet.js": "0.3.1-beta.4",
     "viem": "^2.46.3",

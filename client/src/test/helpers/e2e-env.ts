@@ -1,3 +1,4 @@
+import "dotenv/config";
 import * as z from "zod";
 import { type Hex } from "viem";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
@@ -14,6 +15,7 @@ const SepoliaE2eEnvSchema = z.object({
     .string()
     .regex(/^04[0-9a-fA-F]{128}$/, "Must be uncompressed secp256k1 public key (no 0x)"),
   ERC20_ADDRESS: hex.default("0xB4F1737Af37711e9A5890D9510c9bB60e170CB0D" as Hex),
+  FAUCET_PRIVATE_KEY: hex,
   CANTON_JSON_API_URL: z.url().default("http://localhost:7575"),
 });
 
@@ -27,6 +29,7 @@ export function loadSepoliaE2eEnv(): SepoliaE2eEnv | null {
     MPC_ROOT_PRIVATE_KEY: process.env.MPC_ROOT_PRIVATE_KEY,
     MPC_ROOT_PUBLIC_KEY: process.env.MPC_ROOT_PUBLIC_KEY,
     ERC20_ADDRESS: process.env.ERC20_ADDRESS,
+    FAUCET_PRIVATE_KEY: process.env.FAUCET_PRIVATE_KEY ?? process.env.MPC_ROOT_PRIVATE_KEY,
     CANTON_JSON_API_URL: process.env.CANTON_JSON_API_URL,
   });
 }

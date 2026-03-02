@@ -22,10 +22,13 @@ import { RelayerServer } from "../relayer/server.js";
 import { deriveDepositAddress } from "../mpc/address-derivation.js";
 import { loadSepoliaE2eEnv, toSpkiPublicKey } from "./helpers/e2e-env.js";
 import {
+  DEPOSIT_PATH,
+  DEPOSIT_AMOUNT,
   fetchNonce,
   fetchGasParams,
   checkErc20Balance,
   toCantonHex,
+  fundFromFaucet,
 } from "./helpers/sepolia-helpers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -34,10 +37,8 @@ const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const ECDSA_SIGNATURE = EcdsaSignature.templateId;
 const ERC20_HOLDING = Erc20Holding.templateId;
 
-const PATH = "m/44/60/0/0";
 const SEPOLIA_CHAIN_ID = 11155111;
 const GAS_LIMIT = 100_000n;
-const DEPOSIT_AMOUNT = 100_000_000n; // 100 USDC (6 decimals)
 const POLL_INTERVAL = 5_000;
 const POLL_TIMEOUT = 180_000;
 
@@ -130,8 +131,20 @@ describeIf("sepolia e2e deposit lifecycle", () => {
 
   it("completes full deposit flow through Sepolia", async () => {
     // ── Pre-flight ──
-    const depositAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, depositor, PATH);
+    const depositAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, depositor, DEPOSIT_PATH);
     console.log(`[e2e] Deposit address derived: ${depositAddress}`);
+
+    const vaultAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, issuer, "vault");
+    console.log(`[e2e] Vault address derived: ${vaultAddress}`);
+
+    // Fund the deposit address from the faucet (idempotent)
+    await fundFromFaucet(
+      env!.SEPOLIA_RPC_URL,
+      env!.FAUCET_PRIVATE_KEY,
+      depositAddress,
+      env!.ERC20_ADDRESS,
+      DEPOSIT_AMOUNT,
+    );
 
     const balance = await checkErc20Balance(
       env!.SEPOLIA_RPC_URL,
@@ -147,7 +160,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       `[e2e] Sepolia state: nonce=${nonce}, maxFeePerGas=${maxFeePerGas}, maxPriorityFeePerGas=${maxPriorityFeePerGas}`,
     );
 
-    const recipientPadded = toCantonHex(hexToBigInt(depositAddress), 32);
+    const recipientPadded = toCantonHex(hexToBigInt(vaultAddress), 32);
     const amountPadded = toCantonHex(DEPOSIT_AMOUNT, 32);
     const erc20AddressNoPrefix = env!.ERC20_ADDRESS.slice(2).toLowerCase();
 
@@ -173,7 +186,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       "RequestEvmDeposit",
       {
         requester: depositor,
-        path: PATH,
+        path: DEPOSIT_PATH,
         evmParams,
       },
     );

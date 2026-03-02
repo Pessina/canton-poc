@@ -30,6 +30,10 @@ interface LedgerStreamOptions {
   pollingIdleTimeoutMs?: number;
   /** Backoff delay on HTTP polling errors in ms (default: 1000) */
   pollingErrorBackoffMs?: number;
+  /** Called when the stream transport is ready (WebSocket opened or polling started) */
+  onReady?: () => void;
+  /** Called after a WebSocket reconnection succeeds (not on the initial connection) */
+  onReconnect?: () => void;
 }
 
 export interface StreamHandle {
@@ -48,6 +52,7 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
   let ws: WebSocket | null = null;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasConnectedOnce = false;
 
   function buildFilter(): Record<string, Record<string, never>> {
     const filtersByParty: Record<string, Record<string, never>> = {};
@@ -103,6 +108,8 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
 
     ws.on("open", () => {
       console.log(`WebSocket connected to ${wsUrl}`);
+      const isReconnect = hasConnectedOnce;
+      hasConnectedOnce = true;
       reconnectAttempt = 0;
 
       ws!.send(
@@ -112,6 +119,9 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
           filter: { filtersByParty: buildFilter() },
         }),
       );
+
+      opts.onReady?.();
+      if (isReconnect) opts.onReconnect?.();
     });
 
     ws.on("message", (data: WebSocket.RawData) => {
@@ -155,6 +165,7 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
   async function startPolling(): Promise<void> {
     if (closed) return;
     console.log("Starting HTTP polling fallback...");
+    opts.onReady?.();
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- closed is set by close() during async execution
     while (!closed) {
