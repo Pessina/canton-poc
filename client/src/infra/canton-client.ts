@@ -155,17 +155,33 @@ export async function createUser(
 export async function uploadDar(darPath: string): Promise<void> {
   const fs = await import("node:fs");
   const darBytes = fs.readFileSync(darPath);
-  const res = await fetch(`${BASE_URL}/v2/dars?vetAllPackages=true`, {
-    method: "POST",
-    headers: { "Content-Type": "application/octet-stream" },
-    body: darBytes,
-  });
-  if (!res.ok) {
+  const maxAttempts = 20;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(`${BASE_URL}/v2/dars?vetAllPackages=true`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: darBytes,
+    });
+    if (res.ok) return;
+
     const text = await res.text();
     if (text.includes("KNOWN_PACKAGE_VERSION")) return;
     if (text.includes("NOT_VALID_UPGRADE_PACKAGE")) return;
+
+    // Sandbox JSON API can come up before a synchronizer is fully connected.
+    if (
+      text.includes("PACKAGE_SERVICE_CANNOT_AUTODETECT_SYNCHRONIZER") &&
+      attempt < maxAttempts
+    ) {
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
+    }
+
     throw new Error(`Upload DAR failed: ${res.status} ${text}`);
   }
+
+  throw new Error(`Upload DAR failed after ${maxAttempts} attempts`);
 }
 
 // ---------------------------------------------------------------------------

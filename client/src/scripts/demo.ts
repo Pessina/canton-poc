@@ -12,31 +12,41 @@ import {
 import { createLedgerStream } from "../infra/ledger-stream.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import type { EvmTransactionParams } from "../mpc/crypto.js";
+import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 
+const MPC_ROOT_PUBLIC_KEY =
+  "04bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020decddbf6e00192011648d13b1c00af770c0c1bb609d4d3a5c98a43772e0e18ef4";
 const MPC_PUB_KEY_SPKI =
   "3056301006072a8648ce3d020106052b8104000a03420004bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020decddbf6e00192011648d13b1c00af770c0c1bb609d4d3a5c98a43772e0e18ef4";
 
-const sampleEvmParams: EvmTransactionParams = {
-  to: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-  functionSignature: "transfer(address,uint256)",
-  args: [
-    "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
-    "0000000000000000000000000000000000000000000000000000000005f5e100",
-  ],
-  value: "0000000000000000000000000000000000000000000000000000000000000000",
-  nonce: "0000000000000000000000000000000000000000000000000000000000000001",
-  gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas: "00000000000000000000000000000000000000000000000000000001dcd65000",
-  maxPriorityFee: "000000000000000000000000000000000000000000000000000000003b9aca00",
-  chainId: "0000000000000000000000000000000000000000000000000000000000aa36a7",
-};
+function buildSampleEvmParams(vaultAddress: string): EvmTransactionParams {
+  return {
+    to: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    functionSignature: "transfer(address,uint256)",
+    args: [
+      vaultAddress.slice(2).padStart(64, "0"),
+      "0000000000000000000000000000000000000000000000000000000005f5e100",
+    ],
+    value: "0000000000000000000000000000000000000000000000000000000000000000",
+    nonce: "0000000000000000000000000000000000000000000000000000000000000001",
+    gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
+    maxFeePerGas: "00000000000000000000000000000000000000000000000000000001dcd65000",
+    maxPriorityFee: "000000000000000000000000000000000000000000000000000000003b9aca00",
+    chainId: "0000000000000000000000000000000000000000000000000000000000aa36a7",
+  };
+}
 
 const USER_ID = "mpc-demo";
-const PATH = "m/44/60/0/0";
+
+function packageIdFromTemplateId(templateId: string): string {
+  const packageId = templateId.split(":")[0];
+  if (!packageId) throw new Error(`Invalid templateId: ${templateId}`);
+  return packageId;
+}
 
 async function main() {
   console.log("=== Setup ===");
@@ -50,9 +60,16 @@ async function main() {
 
   await createUser(USER_ID, issuer, [depositor]);
 
+  const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
+  const caip2Id = chainIdHexToCaip2("0000000000000000000000000000000000000000000000000000000000aa36a7");
+  const requesterPath = depositor;
+  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root", caip2Id);
+  const sampleEvmParams = buildSampleEvmParams(vaultAddress);
+
   const orchResult = await createContract(USER_ID, [issuer], VAULT_ORCHESTRATOR, {
     issuer,
     mpcPublicKey: MPC_PUB_KEY_SPKI,
+    vaultAddress: sampleEvmParams.args[0],
   });
   const firstEvent = orchResult.transaction.events?.[0];
   const orchCid =
@@ -71,7 +88,7 @@ async function main() {
     "RequestEvmDeposit",
     {
       requester: depositor,
-      path: PATH,
+      path: requesterPath,
       evmParams: sampleEvmParams,
     },
   );

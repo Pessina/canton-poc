@@ -20,8 +20,9 @@ import { createPublicClient, http, parseAbi, type Hex } from "viem";
 import { sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { uploadDar, allocateParty } from "../infra/canton-client.js";
-import { deriveDepositAddress } from "../mpc/address-derivation.js";
-import { DEPOSIT_PATH, DEPOSIT_AMOUNT } from "../test/helpers/sepolia-helpers.js";
+import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
+import { DEPOSIT_AMOUNT, toCantonHex } from "../test/helpers/sepolia-helpers.js";
+import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
@@ -35,6 +36,12 @@ const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL;
 const ERC20_ADDRESS = (process.env.ERC20_ADDRESS ??
   "0xB4F1737Af37711e9A5890D9510c9bB60e170CB0D") as Hex;
 
+function packageIdFromTemplateId(templateId: string): string {
+  const packageId = templateId.split(":")[0];
+  if (!packageId) throw new Error(`Invalid templateId: ${templateId}`);
+  return packageId;
+}
+
 async function main() {
   if (!MPC_ROOT_PUBLIC_KEY) {
     console.error("MPC_ROOT_PUBLIC_KEY env var is required");
@@ -47,7 +54,14 @@ async function main() {
   const depositor = await allocateParty("SepoliaDepositor");
   console.log(`Canton depositor party: ${depositor}`);
 
-  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, depositor, DEPOSIT_PATH);
+  const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
+  const sepoliaChainIdHex = toCantonHex(11155111n, 32);
+  const caip2Id = chainIdHexToCaip2(sepoliaChainIdHex);
+  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, depositor, caip2Id);
+  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root", caip2Id);
+
+  console.log(`Package ID used for derivation: ${packageId}`);
+  console.log(`CAIP-2 used for derivation:      ${caip2Id}`);
 
   // Faucet address — the stable address the user funds once
   if (FAUCET_PRIVATE_KEY) {
@@ -77,6 +91,7 @@ async function main() {
   console.log("\n── Deposit address (session-specific) ──\n");
   console.log(`  Deposit address: ${depositAddress}`);
   console.log(`    - Auto-funded by faucet at test runtime`);
+  console.log(`  Vault address:   ${vaultAddress}`);
 
   if (SEPOLIA_RPC_URL) {
     console.log("\n── Deposit address balances ──\n");

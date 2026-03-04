@@ -1,6 +1,6 @@
-import { hexToBigInt } from "viem";
 import { getActiveContracts, exerciseChoice, type CreatedEvent } from "../infra/canton-client.js";
 import {
+  EcdsaSignature,
   PendingEvmDeposit,
   VaultOrchestrator,
 } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
@@ -19,27 +19,37 @@ export async function handleEvmTxOutcomeSignature(params: {
 
   console.log(`[Relayer] EvmTxOutcomeSignature created for requestId=${requestId}`);
 
-  const contracts = await getActiveContracts([issuerParty], PendingEvmDeposit.templateId);
-  const matching = contracts.find((c) => {
+  const [pendingContracts, ecdsaContracts] = await Promise.all([
+    getActiveContracts([issuerParty], PendingEvmDeposit.templateId),
+    getActiveContracts([issuerParty], EcdsaSignature.templateId),
+  ]);
+
+  const matchingPending = pendingContracts.find((c) => {
     const cArgs = c.createArgument as Record<string, unknown>;
     return cArgs.requestId === requestId;
   });
-  if (!matching) {
+  if (!matchingPending) {
     console.log(`[Relayer] No PendingEvmDeposit found for requestId=${requestId}, skipping`);
     return;
   }
 
-  const pendingCid = matching.contractId;
-  const pendingArgs = matching.createArgument as Record<string, unknown>;
-  const evmParams = pendingArgs.evmParams as Record<string, unknown>;
-  const evmParamsArgs = evmParams.args as string[];
-  const amount = hexToBigInt(`0x${evmParamsArgs[1]!}`).toString();
+  const matchingEcdsa = ecdsaContracts.find((c) => {
+    const cArgs = c.createArgument as Record<string, unknown>;
+    return cArgs.requestId === requestId;
+  });
+  if (!matchingEcdsa) {
+    console.log(`[Relayer] No EcdsaSignature found for requestId=${requestId}, skipping`);
+    return;
+  }
+
+  const pendingCid = matchingPending.contractId;
+  const ecdsaCid = matchingEcdsa.contractId;
 
   await exerciseChoice(userId, actAs, VaultOrchestrator.templateId, orchCid, "ClaimEvmDeposit", {
     pendingCid,
     outcomeCid,
-    amount,
+    ecdsaCid,
   });
 
-  console.log(`[Relayer] ClaimEvmDeposit exercised for requestId=${requestId}, amount=${amount}`);
+  console.log(`[Relayer] ClaimEvmDeposit exercised for requestId=${requestId}`);
 }

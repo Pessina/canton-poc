@@ -3,7 +3,7 @@ module Erc20Vault where
 import DA.Crypto.Text (BytesHex, PublicKeyHex, SignatureHex, secp256k1WithEcdsaOnly)
 
 import Types (EvmTransactionParams)
-import Crypto (computeRequestId, computeResponseHash, chainIdToDecimalText)
+import Crypto (computeRequestId, computeResponseHash, chainIdToDecimalText, hexToDecimal)
 
 template Erc20Holding
   with
@@ -49,6 +49,7 @@ template VaultOrchestrator
   with
     issuer       : Party
     mpcPublicKey : PublicKeyHex
+    vaultAddress : BytesHex
   where
     signatory issuer
 
@@ -59,6 +60,15 @@ template VaultOrchestrator
         evmParams : EvmTransactionParams
       controller issuer, requester
       do
+        let recipientArg = case evmParams.args of
+              recipient :: _ -> recipient
+              [] -> ""
+
+        assertMsg "Only ERC20 transfer allowed"
+          (evmParams.functionSignature == "transfer(address,uint256)")
+        assertMsg "Transfer recipient must be vault address"
+          (recipientArg == vaultAddress)
+
         let sender = partyToText requester
         let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
         let requestId = computeRequestId sender evmParams caip2Id 1 path
@@ -90,7 +100,7 @@ template VaultOrchestrator
       with
         pendingCid  : ContractId PendingEvmDeposit
         outcomeCid  : ContractId EvmTxOutcomeSignature
-        amount      : Decimal
+        ecdsaCid    : ContractId EcdsaSignature
       controller issuer
       do
         pending <- fetch pendingCid
@@ -105,9 +115,18 @@ template VaultOrchestrator
         let responseHash = computeResponseHash pending.requestId outcome.mpcOutput
         assertMsg "Invalid MPC signature on deposit response"
           (secp256k1WithEcdsaOnly outcome.signature responseHash mpcPublicKey)
+        let pendingArgs : [BytesHex]
+            pendingArgs = (pending.evmParams).args
+        let amountArg : BytesHex
+            amountArg = case pendingArgs of
+              _ :: amountHex :: _ -> amountHex
+              _ -> "0"
+        assertMsg "Transfer args must include amount" (length pendingArgs > 1)
+        let amount = hexToDecimal amountArg
 
         archive pendingCid
         archive outcomeCid
+        archive ecdsaCid
 
         create Erc20Holding with
           issuer

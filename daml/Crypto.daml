@@ -26,11 +26,20 @@ ensureEvenHex : BytesHex -> BytesHex
 ensureEvenHex hex =
   if DA.Text.length hex % 2 == 1 then "0" <> hex else hex
 
+-- | Parse a hex string into an Int. Aborts on invalid input.
+hexToInt : BytesHex -> Int
+hexToInt hex =
+  let val : Optional Int = fromHex (ensureEvenHex hex)
+  in fromSome val
+
 -- | Convert hex chainId to decimal text (e.g., "aa36a7" -> "11155111").
 chainIdToDecimalText : BytesHex -> Text
 chainIdToDecimalText hex =
-  let val : Optional Int = fromHex (ensureEvenHex hex)
-  in show (fromSome val)
+  show (hexToInt hex)
+
+-- | Convert hex-encoded unsigned integer to Decimal.
+hexToDecimal : BytesHex -> Decimal
+hexToDecimal hex = intToDecimal (hexToInt hex)
 
 -- | abi_encode_packed: concatenate all EVM params at canonical widths.
 packParams : EvmTransactionParams -> BytesHex

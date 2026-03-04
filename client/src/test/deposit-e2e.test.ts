@@ -3,7 +3,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeRequestId, type EvmTransactionParams } from "../mpc/crypto.js";
 import { deriveChildPrivateKey, signEvmTxHash, signMpcResponse } from "../mpc-service/signer.js";
-import { KEY_DERIVATION_CAIP2 } from "../mpc/address-derivation.js";
+import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
 import { serializeUnsignedTx, type CantonEvmParams } from "../evm/tx-builder.js";
 import { keccak256, type Hex } from "viem";
 import {
@@ -26,28 +26,32 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const MPC_ROOT_PRIVATE_KEY =
   "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" as Hex;
+const MPC_ROOT_PUBLIC_KEY =
+  "04bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020decddbf6e00192011648d13b1c00af770c0c1bb609d4d3a5c98a43772e0e18ef4";
 const MPC_PUB_KEY_SPKI =
   "3056301006072a8648ce3d020106052b8104000a03420004bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020decddbf6e00192011648d13b1c00af770c0c1bb609d4d3a5c98a43772e0e18ef4";
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const ERC20_HOLDING = Erc20Holding.templateId;
 
-const PATH = "m/44/60/0/0";
+const VAULT_PATH = "root";
 const KEY_VERSION = 1;
 
-const sampleEvmParams: EvmTransactionParams = {
-  to: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-  functionSignature: "transfer(address,uint256)",
-  args: [
-    "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
-    "0000000000000000000000000000000000000000000000000000000005f5e100",
-  ],
-  value: "0000000000000000000000000000000000000000000000000000000000000000",
-  nonce: "0000000000000000000000000000000000000000000000000000000000000001",
-  gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
-  maxFeePerGas: "00000000000000000000000000000000000000000000000000000001dcd65000",
-  maxPriorityFee: "000000000000000000000000000000000000000000000000000000003b9aca00",
-  chainId: "0000000000000000000000000000000000000000000000000000000000aa36a7",
-};
+function buildSampleEvmParams(vaultAddress: Hex): EvmTransactionParams {
+  return {
+    to: "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    functionSignature: "transfer(address,uint256)",
+    args: [
+      vaultAddress.slice(2).padStart(64, "0"),
+      "0000000000000000000000000000000000000000000000000000000005f5e100",
+    ],
+    value: "0000000000000000000000000000000000000000000000000000000000000000",
+    nonce: "0000000000000000000000000000000000000000000000000000000000000001",
+    gasLimit: "000000000000000000000000000000000000000000000000000000000000c350",
+    maxFeePerGas: "00000000000000000000000000000000000000000000000000000001dcd65000",
+    maxPriorityFee: "000000000000000000000000000000000000000000000000000000003b9aca00",
+    chainId: "0000000000000000000000000000000000000000000000000000000000aa36a7",
+  };
+}
 
 function getCreatedEvent(event: Event): CreatedEvent | undefined {
   if ("CreatedEvent" in event) return event.CreatedEvent;
@@ -74,8 +78,11 @@ function firstCreatedCid(res: TransactionResponse): string {
   return created.contractId;
 }
 
-function deriveCaip2Id(chainIdHex: string): string {
-  return "eip155:" + Number(BigInt("0x" + chainIdHex.replace(/^0+/, ""))).toString();
+function packageIdFromTemplateId(templateId: string): string {
+  const parts = templateId.split(":");
+  const packageId = parts[0];
+  if (!packageId) throw new Error(`Invalid templateId: ${templateId}`);
+  return packageId;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,12 +108,17 @@ beforeAll(async () => {
 // ---------------------------------------------------------------------------
 describe("deposit e2e lifecycle", () => {
   it("completes the full deposit flow from request to Erc20Holding", async () => {
-    const caip2Id = deriveCaip2Id(sampleEvmParams.chainId);
+    const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
+    const requesterPath = depositor;
+    const caip2Id = chainIdHexToCaip2("0000000000000000000000000000000000000000000000000000000000aa36a7");
+    const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, VAULT_PATH, caip2Id);
+    const sampleEvmParams = buildSampleEvmParams(vaultAddress);
 
     // Step 1: Create VaultOrchestrator
     const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
       mpcPublicKey: MPC_PUB_KEY_SPKI,
+      vaultAddress: sampleEvmParams.args[0],
     });
     const orchCid = firstCreatedCid(orchResult);
 
@@ -119,7 +131,7 @@ describe("deposit e2e lifecycle", () => {
       "RequestEvmDeposit",
       {
         requester: depositor,
-        path: PATH,
+        path: requesterPath,
         evmParams: sampleEvmParams,
       },
     );
@@ -129,15 +141,22 @@ describe("deposit e2e lifecycle", () => {
     const pendingArgs = getArgs(pending!);
     const requestId = pendingArgs.requestId as string;
 
-    const tsRequestId = computeRequestId(depositor, sampleEvmParams, caip2Id, KEY_VERSION, PATH);
+    const tsRequestId = computeRequestId(
+      depositor,
+      sampleEvmParams,
+      caip2Id,
+      KEY_VERSION,
+      requesterPath,
+    );
     expect(tsRequestId.slice(2)).toBe(requestId);
 
     // Step 3: MPC signs the EVM transaction
+    const predecessorId = packageIdFromTemplateId(pending!.templateId);
     const childPrivateKey = deriveChildPrivateKey(
       MPC_ROOT_PRIVATE_KEY,
+      predecessorId,
       depositor,
-      PATH,
-      KEY_DERIVATION_CAIP2,
+      chainIdHexToCaip2(sampleEvmParams.chainId),
     );
     const evmParamsForTx: CantonEvmParams = sampleEvmParams;
     const serializedUnsigned = serializeUnsignedTx(evmParamsForTx);
@@ -177,6 +196,7 @@ describe("deposit e2e lifecycle", () => {
     const outcomeEvent = findCreated(outcomeResult, "EvmTxOutcomeSignature");
     expect(outcomeEvent).toBeDefined();
     const outcomeCid = outcomeEvent!.contractId;
+    const ecdsaCid = ecdsaSig!.contractId;
 
     // Step 6: ClaimEvmDeposit
     const pendingCid = pending!.contractId;
@@ -188,7 +208,7 @@ describe("deposit e2e lifecycle", () => {
       VAULT_ORCHESTRATOR,
       orchCid,
       "ClaimEvmDeposit",
-      { pendingCid, outcomeCid, amount: amountFromArgs },
+      { pendingCid, outcomeCid, ecdsaCid },
     );
 
     const holding = findCreated(claimResult, "Erc20Holding");

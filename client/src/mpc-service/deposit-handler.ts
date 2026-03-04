@@ -1,4 +1,4 @@
-import { keccak256, hexToNumber, createPublicClient, http, type Hex } from "viem";
+import { keccak256, createPublicClient, http, type Hex } from "viem";
 import { sepolia } from "viem/chains";
 import {
   serializeUnsignedTx,
@@ -8,7 +8,7 @@ import {
 import { deriveChildPrivateKey, signEvmTxHash, signMpcResponse } from "./signer.js";
 import { exerciseChoice, type CreatedEvent } from "../infra/canton-client.js";
 import { computeRequestId, type EvmTransactionParams } from "../mpc/crypto.js";
-import { KEY_DERIVATION_CAIP2 } from "../mpc/address-derivation.js";
+import { chainIdHexToCaip2 } from "../mpc/address-derivation.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
@@ -24,18 +24,23 @@ export async function handlePendingEvmDeposit(params: {
   const { orchCid, userId, actAs, rootPrivateKey, rpcUrl, event } = params;
   const args = event.createArgument as Record<string, unknown>;
   const requester = args.requester as string;
-  const path = args.path as string;
+  const requestPath = args.path as string;
   const contractRequestId = args.requestId as string;
   const evmParams = args.evmParams as CantonEvmParams;
+  const predecessorId = event.templateId.split(":")[0];
+  if (!predecessorId) {
+    throw new Error(`Invalid templateId format: ${event.templateId}`);
+  }
+  const keyDerivationPath = requester;
 
   // Independently derive requestId — never trust on-chain data blindly
-  const caip2Id = "eip155:" + hexToNumber(`0x${evmParams.chainId}`);
+  const caip2Id = chainIdHexToCaip2(evmParams.chainId);
   const computedRequestId = computeRequestId(
     requester,
     evmParams as EvmTransactionParams,
     caip2Id,
     1,
-    path,
+    requestPath,
   );
   if (computedRequestId.slice(2) !== contractRequestId) {
     throw new Error(
@@ -52,9 +57,9 @@ export async function handlePendingEvmDeposit(params: {
 
   const childPrivateKey = deriveChildPrivateKey(
     rootPrivateKey,
-    requester,
-    path,
-    KEY_DERIVATION_CAIP2,
+    predecessorId,
+    keyDerivationPath,
+    caip2Id,
   );
   const { r, s, v } = signEvmTxHash(childPrivateKey, txHash);
 

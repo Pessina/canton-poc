@@ -36,7 +36,7 @@ sampleEvmParams : EvmTransactionParams
 sampleEvmParams = EvmTransactionParams with
   to = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
   functionSignature = "transfer(address,uint256)"
-  args = [ "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045"
+  args = [ sampleVaultAddress
          , "0000000000000000000000000000000000000000000000000000000005f5e100"
          ]
   value = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -45,6 +45,9 @@ sampleEvmParams = EvmTransactionParams with
   maxFeePerGas = "00000000000000000000000000000000000000000000000000000001dcd65000"
   maxPriorityFee = "000000000000000000000000000000000000000000000000000000003b9aca00"
   chainId = "0000000000000000000000000000000000000000000000000000000000aa36a7"
+
+sampleVaultAddress : Text
+sampleVaultAddress = "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045"
 
 ------------------------------------------------------------------------
 -- Test 1: keccak256 known vector
@@ -120,17 +123,19 @@ test5_depositLifecycle = do
     createCmd VaultOrchestrator with
       issuer
       mpcPublicKey = testPubKeyHex
+      vaultAddress = sampleVaultAddress
 
+  let depositPath = partyToText depositor
   pendingCid <- submit (actAs issuer <> actAs depositor) do
     exerciseCmd orchCid RequestEvmDeposit with
       requester = depositor
-      path      = "m/44/60/0/0"
+      path      = depositPath
       evmParams = sampleEvmParams
 
   pending <- queryContractId depositor pendingCid
   let pd = fromSome pending
   assertMsg "requestId must be 32 bytes" (byteCount pd.requestId == 32)
-  assertMsg "path must match" (pd.path == "m/44/60/0/0")
+  assertMsg "path must match" (pd.path == depositPath)
   assertMsg "evmParams must match" (pd.evmParams == sampleEvmParams)
 
   pure ()
@@ -195,19 +200,26 @@ test10_claimLifecycle = do
     createCmd VaultOrchestrator with
       issuer
       mpcPublicKey = testPubKeyHex
+      vaultAddress = sampleVaultAddress
 
+  let depositPath = partyToText depositor
   pendingCid <- submit (actAs issuer <> actAs depositor) do
     exerciseCmd orchCid RequestEvmDeposit with
       requester = depositor
-      path      = "m/44/60/0/0"
+      path      = depositPath
       evmParams = sampleEvmParams
 
   pending <- queryContractId depositor pendingCid
   let pd = fromSome pending
 
-  let mpcOutput = "01"
-  let responseHash = computeResponseHash pd.requestId mpcOutput
+  ecdsaCid <- submit issuer do
+    exerciseCmd orchCid SignEvmTx with
+      requestId = pd.requestId
+      r = "00"
+      s = "00"
+      v = 0
 
+  let mpcOutput = "01"
   outcomeCid <- submit issuer do
     exerciseCmd orchCid ProvideEvmOutcomeSig with
       requestId = pd.requestId
@@ -218,7 +230,7 @@ test10_claimLifecycle = do
     exerciseCmd orchCid ClaimEvmDeposit with
       pendingCid
       outcomeCid
-      amount = 100_000_000.0
+      ecdsaCid
 
   pure ()
 

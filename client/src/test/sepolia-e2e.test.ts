@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hexToBigInt } from "viem";
 import {
   allocateParty,
   createUser,
@@ -16,13 +15,13 @@ import {
   VaultOrchestrator,
   Erc20Holding,
   EcdsaSignature,
+  EvmTxOutcomeSignature,
 } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import { MpcServer } from "../mpc-service/server.js";
-import { RelayerServer } from "../relayer/server.js";
-import { deriveDepositAddress } from "../mpc/address-derivation.js";
+import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
+import { reconstructSignedTx, submitRawTransaction } from "../evm/tx-builder.js";
 import { loadSepoliaE2eEnv, toSpkiPublicKey } from "./helpers/e2e-env.js";
 import {
-  DEPOSIT_PATH,
   DEPOSIT_AMOUNT,
   fetchNonce,
   fetchGasParams,
@@ -35,6 +34,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const ECDSA_SIGNATURE = EcdsaSignature.templateId;
+const OUTCOME_SIGNATURE = EvmTxOutcomeSignature.templateId;
 const ERC20_HOLDING = Erc20Holding.templateId;
 
 const SEPOLIA_CHAIN_ID = 11155111;
@@ -58,6 +58,12 @@ function findCreated(
   return event ? getCreatedEvent(event) : undefined;
 }
 
+function packageIdFromTemplateId(templateId: string): string {
+  const packageId = templateId.split(":")[0];
+  if (!packageId) throw new Error(`Invalid templateId: ${templateId}`);
+  return packageId;
+}
+
 async function pollForContract(
   parties: string[],
   templateId: string,
@@ -79,10 +85,12 @@ const describeIf = env ? describe : describe.skip;
 
 describeIf("sepolia e2e deposit lifecycle", () => {
   let mpcServer: MpcServer;
-  let relayerServer: RelayerServer;
   let issuer: string;
   let depositor: string;
   let orchCid: string;
+  let packageId: string;
+  let caip2Id: string;
+  let vaultAddressPadded: string;
 
   const USER_ID = "sepolia-e2e";
 
@@ -93,11 +101,17 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     depositor = await allocateParty("SepoliaDepositor");
     await createUser(USER_ID, issuer, [depositor]);
 
-    const mpcPubKeySpki = toSpkiPublicKey(env!.MPC_ROOT_PUBLIC_KEY);
+    const chainIdHex = toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32);
+    packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
+    caip2Id = chainIdHexToCaip2(chainIdHex);
+    const vaultAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, packageId, "root", caip2Id);
+    vaultAddressPadded = vaultAddress.slice(2).padStart(64, "0");
 
+    const mpcPubKeySpki = toSpkiPublicKey(env!.MPC_ROOT_PUBLIC_KEY);
     const orchResult = await createContract(USER_ID, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
       mpcPublicKey: mpcPubKeySpki,
+      vaultAddress: vaultAddressPadded,
     });
     const orchEvent = findCreated(orchResult.transaction.events, "VaultOrchestrator");
     orchCid = orchEvent!.contractId;
@@ -110,32 +124,24 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       rpcUrl: env!.SEPOLIA_RPC_URL,
     });
 
-    relayerServer = new RelayerServer({
-      orchCid,
-      userId: USER_ID,
-      parties: [issuer],
-      issuerParty: issuer,
-      rpcUrl: env!.SEPOLIA_RPC_URL,
-    });
-
     await mpcServer.start();
     await mpcServer.waitUntilReady();
-    await relayerServer.start();
-    await relayerServer.waitUntilReady();
   }, 60_000);
 
   afterAll(() => {
     mpcServer.shutdown();
-    relayerServer.shutdown();
   });
 
   it("completes full deposit flow through Sepolia", async () => {
     // ── Pre-flight ──
-    const depositAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, depositor, DEPOSIT_PATH);
+    const requesterPath = depositor;
+    const depositAddress = deriveDepositAddress(
+      env!.MPC_ROOT_PUBLIC_KEY,
+      packageId,
+      requesterPath,
+      caip2Id,
+    );
     console.log(`[e2e] Deposit address derived: ${depositAddress}`);
-
-    const vaultAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, issuer, "vault");
-    console.log(`[e2e] Vault address derived: ${vaultAddress}`);
 
     // Fund the deposit address from the faucet (idempotent)
     await fundFromFaucet(
@@ -160,14 +166,12 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       `[e2e] Sepolia state: nonce=${nonce}, maxFeePerGas=${maxFeePerGas}, maxPriorityFeePerGas=${maxPriorityFeePerGas}`,
     );
 
-    const recipientPadded = toCantonHex(hexToBigInt(vaultAddress), 32);
     const amountPadded = toCantonHex(DEPOSIT_AMOUNT, 32);
     const erc20AddressNoPrefix = env!.ERC20_ADDRESS.slice(2).toLowerCase();
-
     const evmParams = {
       to: erc20AddressNoPrefix,
       functionSignature: "transfer(address,uint256)",
-      args: [recipientPadded, amountPadded],
+      args: [vaultAddressPadded, amountPadded],
       value: toCantonHex(0n, 32),
       nonce: toCantonHex(BigInt(nonce), 32),
       gasLimit: toCantonHex(GAS_LIMIT, 32),
@@ -176,8 +180,8 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       chainId: toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32),
     };
 
-    // ── User → Canton: RequestEvmDeposit (evmParams, path) ──
-    console.log("[e2e] User → Canton: RequestEvmDeposit (evmParams, path)");
+    // ── User → Canton: RequestEvmDeposit (evmParams, path=requesterParty) ──
+    console.log("[e2e] User → Canton: RequestEvmDeposit");
     const depositResult = await exerciseChoice(
       USER_ID,
       [issuer, depositor],
@@ -186,58 +190,75 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       "RequestEvmDeposit",
       {
         requester: depositor,
-        path: DEPOSIT_PATH,
+        path: requesterPath,
         evmParams,
       },
     );
 
-    // ── Canton: creates PendingEvmDeposit ──
     const pending = findCreated(depositResult.transaction.events, "PendingEvmDeposit");
     expect(pending).toBeDefined();
+    const pendingCid = pending!.contractId;
     const pendingArgs = pending!.createArgument as Record<string, unknown>;
     const requestId = pendingArgs.requestId as string;
-    console.log(`[e2e] Canton: creates PendingEvmDeposit (requestId=${requestId})`);
+    console.log(`[e2e] PendingEvmDeposit created (requestId=${requestId})`);
 
-    // ── Canton → MPC Service: observes PendingEvmDeposit ──
-    // ── MPC Service: buildCalldata, serializeTx, keccak256→txHash, deriveChildKey, sign(txHash) ──
-    // ── MPC Service → Canton: SignEvmTx → EcdsaSignature (r, s, v) ──
-    console.log("[e2e] Waiting for MPC to sign... (Canton → MPC → Canton: SignEvmTx)");
+    // ── MPC signs tx on Canton ──
     const ecdsaSig = await pollForContract(
       [issuer],
       ECDSA_SIGNATURE,
       (args) => args.requestId === requestId,
       "EcdsaSignature",
     );
+    const ecdsaCid = ecdsaSig.contractId;
     const ecdsaArgs = ecdsaSig.createArgument as Record<string, unknown>;
-    console.log(
-      `[e2e] MPC Service → Canton: EcdsaSignature created (r=${(ecdsaArgs.r as string).slice(0, 16)}..., v=${String(ecdsaArgs.v)})`,
+    console.log("[e2e] EcdsaSignature observed");
+
+    // ── User submits signed tx to Sepolia ──
+    const signedTx = reconstructSignedTx(evmParams, {
+      r: `0x${ecdsaArgs.r as string}`,
+      s: `0x${ecdsaArgs.s as string}`,
+      v: Number(ecdsaArgs.v),
+    });
+    const txHash = await submitRawTransaction(env!.SEPOLIA_RPC_URL, signedTx);
+    console.log(`[e2e] User submitted signed tx: ${txHash}`);
+
+    // ── MPC verifies Sepolia receipt and posts outcome signature ──
+    const outcome = await pollForContract(
+      [issuer],
+      OUTCOME_SIGNATURE,
+      (args) => args.requestId === requestId,
+      "EvmTxOutcomeSignature",
+    );
+    const outcomeCid = outcome.contractId;
+    const outcomeArgs = outcome.createArgument as Record<string, unknown>;
+    expect(outcomeArgs.mpcOutput).toBe("01");
+    console.log("[e2e] EvmTxOutcomeSignature observed");
+
+    // ── User claims on Canton ──
+    const claimResult = await exerciseChoice(
+      USER_ID,
+      [issuer],
+      VAULT_ORCHESTRATOR,
+      orchCid,
+      "ClaimEvmDeposit",
+      {
+        pendingCid,
+        outcomeCid,
+        ecdsaCid,
+      },
     );
 
-    // ── Relayer: observes EcdsaSignature → reconstructSignedTx → eth_sendRawTransaction ──
-    // ── MPC Service: polls Sepolia for receipt → verifies status → signs outcome ──
-    // ── MPC Service → Canton: ProvideEvmOutcomeSig → EvmTxOutcomeSignature ──
-    // ── Relayer: observes EvmTxOutcomeSignature → ClaimEvmDeposit → Erc20Holding ──
-    // NOTE: EvmTxOutcomeSignature is transient — archived immediately on claim.
-    // We skip polling for it and go straight to the final Erc20Holding.
-    console.log(
-      "[e2e] Waiting for Relayer → Sepolia, MPC receipt verification, and ClaimEvmDeposit...",
-    );
-    const holding = await pollForContract(
-      [issuer, depositor],
-      ERC20_HOLDING,
-      (args) => args.owner === depositor,
-      "Erc20Holding",
-    );
-    const holdingArgs = holding.createArgument as Record<string, unknown>;
-    console.log(
-      `[e2e] Canton: creates Erc20Holding (owner=${depositor}, amount=${String(holdingArgs.amount)})`,
-    );
-
-    // ── User: assert balance ──
-    console.log("[e2e] User: assert balance");
+    const holding = findCreated(claimResult.transaction.events, "Erc20Holding");
+    expect(holding).toBeDefined();
+    const holdingArgs = holding!.createArgument as Record<string, unknown>;
     expect(holdingArgs.owner).toBe(depositor);
     expect(holdingArgs.issuer).toBe(issuer);
     expect(parseFloat(holdingArgs.amount as string)).toBe(parseFloat(DEPOSIT_AMOUNT.toString()));
+
+    const activeHoldings = await getActiveContracts([issuer, depositor], ERC20_HOLDING);
+    expect(activeHoldings.some((c) => (c.createArgument as Record<string, unknown>).owner === depositor)).toBe(
+      true,
+    );
     console.log("[e2e] All assertions passed");
   }, 300_000);
 });
