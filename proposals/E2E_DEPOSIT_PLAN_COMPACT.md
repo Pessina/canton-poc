@@ -69,11 +69,12 @@ wrapped ERC-20 balance.
  |<-----------------------------|                              |                              |
  |                              |                              |                              |
  | ClaimEvmDeposit              |                              |                              |
- |-- pendingCid, outcomeCid --->|                              |                              |
+ |-- pending, outcome, ecdsa ->|                              |                              |
  |                              |                              |                              |
  |                              | verify MPC signature         |                              |
  |                              | archive PendingEvmDeposit    |                              |
  |                              | archive EvmTxOutcomeSig      |                              |
+ |                              | archive EcdsaSignature       |                              |
  |                              |                              |                              |
  |                              | creates Erc20Holding         |                              |
  |                              |                              |                              |
@@ -96,6 +97,7 @@ template VaultOrchestrator
   with
     issuer       : Party          -- the party that operates the vault
     mpcPublicKey : PublicKeyHex   -- SPKI-encoded secp256k1 public key
+    vaultAddress : BytesHex       -- centralized sweep address (derived from MPC root key + "root" path)
   where
     signatory issuer
 
@@ -106,7 +108,10 @@ template VaultOrchestrator
 ```
 
 `mpcPublicKey` is set once at creation and used by `ClaimEvmDeposit` to verify
-the MPC's DER signature via `secp256k1WithEcdsaOnly`.
+the MPC's DER signature via `secp256k1WithEcdsaOnly`. `vaultAddress` is the
+centralized sweep address (derived from MPC root key + `"root"` path) —
+`RequestEvmDeposit` validates that the transfer recipient (`args[0]`) matches
+this address, ensuring all deposits are swept to the vault.
 
 ### `EvmTransactionParams` (Types.daml)
 
@@ -131,16 +136,9 @@ data EvmTransactionParams = EvmTransactionParams
 ```
 
 The MPC and user reconstruct calldata deterministically from
-`functionSignature` + `args`:
-
-**Daml authorization example:**
-
-```daml
-assertMsg "Only ERC20 transfer allowed"
-  (evmParams.functionSignature == "transfer(address,uint256)")
-let recipientArg = evmParams.args !! 0   -- vault address
-let amountArg    = evmParams.args !! 1   -- transfer amount
-```
+`functionSignature` + `args`. `RequestEvmDeposit` validates the function
+signature and that the transfer recipient (`args[0]`) is the vault sweep
+address (see choice below).
 
 ### `PendingEvmDeposit` (Erc20Vault.daml)
 
@@ -225,6 +223,11 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
     evmParams : EvmTransactionParams
   controller issuer, requester
   do
+    assertMsg "Only ERC20 transfer allowed"
+      (evmParams.functionSignature == "transfer(address,uint256)")
+    assertMsg "Transfer recipient must be vault address"
+      (evmParams.args !! 0 == vaultAddress)
+
     let sender = partyToText requester
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
     let requestId = computeRequestId sender evmParams caip2Id 1 path
@@ -267,13 +270,14 @@ nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
 ```
 
 **`ClaimEvmDeposit`** — user triggers claim after observing the outcome
-signature.
+signature. Also archives `EcdsaSignature` for ledger cleanup.
 
 ```daml
 nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
   with
     pendingCid  : ContractId PendingEvmDeposit
     outcomeCid  : ContractId EvmTxOutcomeSignature
+    ecdsaCid    : ContractId EcdsaSignature
   controller issuer
   do
     pending <- fetch pendingCid
@@ -293,6 +297,7 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
 
     archive pendingCid
     archive outcomeCid
+    archive ecdsaCid
 
     create Erc20Holding with
       issuer
@@ -377,14 +382,61 @@ the signed transaction to Sepolia, and claims the deposit on Canton.
 ```
 1. Derive deposit address from MPC public key + user path
 2. Derive vault (centralized) address from MPC public key + "root" path
-3. Build ERC20 transfer(vaultAddr, amount) as evmParams
+3. Build evmParams: to=ERC20 contract, args=[vaultAddr, amount] (transfer call)
 4. Exercise RequestEvmDeposit(requester, path, evmParams)
    -> creates PendingEvmDeposit on Canton
 5. Observe EcdsaSignature (MPC signs autonomously)
 6. Reconstruct signed EVM tx from evmParams + (r, s, v)
 7. Submit to Sepolia: eth_sendRawTransaction
 8. Observe EvmTxOutcomeSignature (MPC verifies receipt autonomously)
-9. Exercise ClaimEvmDeposit(pendingCid, outcomeCid)
-   -> verifies MPC sig on-chain, creates Erc20Holding
+9. Exercise ClaimEvmDeposit(pendingCid, outcomeCid, ecdsaCid)
+   -> verifies MPC sig on-chain, archives all evidence, creates Erc20Holding
 10. Assert Erc20Holding balance matches deposit amount
 ```
+
+## Design Decisions
+
+### requestId Uniqueness / Double-Claim Prevention
+
+Without unique `requestId`s, a user can create duplicate `PendingEvmDeposit`
+contracts (same requester, path, evmParams). The MPC would sign once, but
+additional outcome signatures could be issued for the remaining pendings,
+minting more `Erc20Holding` than was actually deposited on-chain.
+
+Daml contract IDs are opaque (not serializable) and Daml provides no randomness,
+so neither can serve as a uniqueness source. Two approaches:
+
+**Option A: Nonce on VaultOrchestrator (MPC stays off-chain)**
+
+Add a `nonce : Int` to `VaultOrchestrator`. `RequestEvmDeposit` becomes
+consuming — atomically increments the nonce, includes it in `requestId`, and
+recreates the orchestrator. Multiple orchestrator instances can exist for
+throughput (each with its own nonce space). Other choices remain nonconsuming.
+
+```daml
+template VaultOrchestrator
+  with
+    issuer : Party; mpcPublicKey : PublicKeyHex
+    vaultAddress : BytesHex; nonce : Int
+  where signatory issuer
+
+    choice RequestEvmDeposit : (ContractId VaultOrchestrator, ContractId PendingEvmDeposit)
+      with requester : Party; path : Text; evmParams : EvmTransactionParams
+      controller issuer, requester
+      do -- ... validation, requestId includes nonce ...
+         pendingCid <- create PendingEvmDeposit with ...
+         orchCid <- create this with nonce = nonce + 1
+         pure (orchCid, pendingCid)
+    -- SignEvmTx, ProvideEvmOutcomeSig, ClaimEvmDeposit remain nonconsuming
+```
+
+- **Pro:** MPC stays off-chain. On-chain sig verification via
+  `secp256k1WithEcdsaOnly`.
+- **Con:** Consuming choice serializes requests per orchestrator instance.
+
+**Option B: MPC as External Party**
+
+MPC becomes a Canton "external party" that signs Canton transactions directly.
+No `secp256k1WithEcdsaOnly` needed in Daml — Canton validates the MPC's identity
+through its transaction signature. Simpler Daml, but MPC must handle Canton
+transaction serialization and manage Canton party keys alongside secp256k1 keys.
