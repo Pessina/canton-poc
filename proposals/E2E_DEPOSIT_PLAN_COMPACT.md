@@ -238,6 +238,15 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
 `keyVersion = 1` is hardcoded. `algo`, `dest`, `params` are hardcoded inside
 `computeRequestId` (`"ECDSA"`, `"ethereum"`, `""`).
 
+**PackageId in the derivation path:** The `sender` used above is `partyToText
+requester`. In production, both the user and MPC prepend the packageId:
+`sender = "{packageId}:{partyId}"`. The packageId is not accessible inside Daml
+(no built-in function exists), but every Canton ledger event includes it in the
+`templateId` field (`"{packageId}:{module}:{template}"`). Both sides extract it
+from the `PendingEvmDeposit` created event via `event.templateId.split(":")[0]`
+and inject it into the predecessorId automatically — no Daml contract changes
+needed. Validated in `PackageIdPoc.daml` and `package-id-poc.test.ts`.
+
 **`SignEvmTx`** — MPC posts its EVM transaction signature.
 
 ```daml
@@ -440,3 +449,82 @@ MPC becomes a Canton "external party" that signs Canton transactions directly.
 No `secp256k1WithEcdsaOnly` needed in Daml — Canton validates the MPC's identity
 through its transaction signature. Simpler Daml, but MPC must handle Canton
 transaction serialization and manage Canton party keys alongside secp256k1 keys.
+
+### DDoS Prevention: Authorization Pattern
+
+Without access control any party could spam `RequestEvmDeposit` and overload the
+MPC. Follows Canton's [Authorization Pattern](https://docs.digitalasset.com/build/3.4/sdlc-howtos/smart-contracts/develop/patterns/authorization.html):
+the issuer creates a token with a hard use-limit per user. `RequestEvmDeposit`
+becomes `controller requester` only — the choice fetches the token, validates
+ownership, and burns one use. No token → tx fails → MPC never sees it.
+
+```daml
+template DepositAuthorization
+  with
+    issuer        : Party
+    owner         : Party
+    remainingUses : Int
+  where
+    signatory issuer
+    observer owner
+```
+
+Users request authorization via the orchestrator; the issuer approves or ignores:
+
+```daml
+-- User requests an authorization card
+nonconsuming choice RequestDepositAuth : ContractId DepositAuthProposal
+  with requester : Party
+  controller requester
+  do create DepositAuthProposal with issuer; owner = requester
+
+-- Issuer approves the request
+nonconsuming choice ApproveDepositAuth : ContractId DepositAuthorization
+  with
+    proposalCid   : ContractId DepositAuthProposal
+    remainingUses : Int
+  controller issuer
+  do
+    proposal <- fetch proposalCid
+    archive proposalCid
+    create DepositAuthorization with
+      issuer; owner = proposal.owner; remainingUses
+```
+
+`RequestEvmDeposit` validates and burns one use:
+
+```daml
+nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
+  with
+    requester : Party
+    path      : Text
+    evmParams : EvmTransactionParams
+    authCid   : ContractId DepositAuthorization
+  controller requester
+  do
+    auth <- fetch authCid
+    assertMsg "Auth issuer mismatch" (auth.issuer == issuer)
+    assertMsg "Auth owner mismatch"  (auth.owner == requester)
+    assertMsg "No remaining uses"    (auth.remainingUses > 0)
+    archive authCid
+    when (auth.remainingUses > 1) do
+      void $ create auth with remainingUses = auth.remainingUses - 1
+
+    assertMsg "Only ERC20 transfer allowed"
+      (evmParams.functionSignature == "transfer(address,uint256)")
+    assertMsg "Transfer recipient must be vault address"
+      (evmParams.args !! 0 == vaultAddress)
+
+    let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
+    let requestId = computeRequestId (partyToText requester) evmParams caip2Id 1 path
+    create PendingEvmDeposit with issuer; requester; requestId; path; evmParams
+```
+
+**Alternative: Propose and Accept.** Instead of the issuer pushing cards, the
+user creates a `DepositAuthProposal` and the issuer's backend accepts or ignores
+it — combining the Authorization Pattern with the [Propose and Accept
+Pattern](https://docs.digitalasset.com/build/3.4/sdlc-howtos/smart-contracts/develop/patterns/propose-accept.html).
+
+**Properties:** unforgeable (`signatory issuer`), self-enforcing (counter
+decrements on-ledger), revocable (issuer archives the token), MPC-safe (only
+valid `PendingEvmDeposit` contracts reach the MPC).
