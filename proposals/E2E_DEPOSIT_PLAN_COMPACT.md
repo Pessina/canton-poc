@@ -249,10 +249,14 @@ The packageId is not accessible inside Daml (no built-in function). It comes fro
 the `CreatedEvent.templateId` (`"{packageId}:{module}:{template}"`), a Required
 field in the Ledger API v2 spec set by the participant, not user-supplied.
 
-The packageId does not need to be included in `computeRequestId` because it is
-already implicit in the derived deposit address — the `from` address in the EVM
-transaction is derived using `(predecessorId=packageId, path=partyId)`, so the
-`evmParams` in the requestId already bind to a package-scoped key.
+> **⚠ Security review needed:** Neither the `from` address nor the packageId
+> appear in `computeRequestId` or `evmParams`, so the `requestId` is not
+> cryptographically bound to the package on-chain. Two `VaultOrchestrator`
+> instances from different packages could produce identical `requestId`s for
+> the same `(requester, evmParams, path)` — there is no on-chain link between
+> the vault contract and the requestId.
+> `templateTypeRepToText` could expose the packageId within Daml but is
+> experimental (`--target=2.dev` only). Review before production.
 
 **`SignEvmTx`** — MPC posts its EVM transaction signature.
 
@@ -329,7 +333,7 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
 packParams : EvmTransactionParams -> BytesHex
 packParams p =
   padHex p.to 20
-    <> textToHex p.functionSignature
+    <> toHex p.functionSignature
     <> foldl (<>) "" p.args
     <> padHex p.value          32
     <> padHex p.nonce          32
@@ -344,13 +348,13 @@ computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> BytesH
 computeRequestId sender evmParams caip2Id keyVersion path =
   let payload = packParams evmParams
   in keccak256
-    ( textToHex sender
+    ( toHex sender
       <> payload
-      <> textToHex caip2Id
+      <> toHex caip2Id
       <> uint32ToHex keyVersion
-      <> textToHex path
-      <> textToHex "ECDSA"
-      <> textToHex "ethereum"
+      <> toHex path
+      <> toHex "ECDSA"
+      <> toHex "ethereum"
     )
 ```
 
