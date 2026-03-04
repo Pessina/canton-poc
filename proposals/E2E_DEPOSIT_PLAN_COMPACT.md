@@ -257,6 +257,13 @@ field in the Ledger API v2 spec set by the participant, not user-supplied.
 > the vault contract and the requestId.
 > `templateTypeRepToText` could expose the packageId within Daml but is
 > experimental (`--target=2.dev` only). Review before production.
+>
+> **Proposed mitigation:** Add a `vaultId : Text` field to `VaultOrchestrator`,
+> set by the issuer at creation time (e.g. a UUID or deterministic identifier).
+> Uniqueness is enforced by the issuer off-chain — Canton 3.x does not support
+> contract key uniqueness. Include `vaultId` in `computeRequestId` so that each
+> orchestrator instance produces distinct request IDs. This binds the requestId
+> to a specific vault without relying on packageId or experimental features.
 
 **`SignEvmTx`** — MPC posts its EVM transaction signature.
 
