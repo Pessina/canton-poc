@@ -9,6 +9,7 @@ Research findings on idiomatic patterns for token balance management and contrac
 Canton uses a **UTXO (Unspent Transaction Output) model**, not an account-based model like EVM.
 
 **Example:** User has 20 USDC from 3 deposits (4, 10, 6):
+
 - **Idiomatic (UTXO):** 3 separate `Holding` contracts with amounts 4, 10, 6
 - **Anti-pattern (Account):** 1 contract with `amount = 20`
 
@@ -16,11 +17,11 @@ A user's balance is the **sum of their active holding contracts**, computed off-
 
 ### Why UTXO
 
-| Concern | UTXO Model | Account Model |
-|---|---|---|
-| **Privacy** | Transfer only reveals the specific holding being spent | Reveals full balance to counterparty |
-| **Contention** | Parallel operations on independent holdings | Single contract = bottleneck for concurrent txs |
-| **Scalability** | Holdings can be split/merged as needed | All operations serialize on one contract |
+| Concern         | UTXO Model                                             | Account Model                                   |
+| --------------- | ------------------------------------------------------ | ----------------------------------------------- |
+| **Privacy**     | Transfer only reveals the specific holding being spent | Reveals full balance to counterparty            |
+| **Contention**  | Parallel operations on independent holdings            | Single contract = bottleneck for concurrent txs |
+| **Scalability** | Holdings can be split/merged as needed                 | All operations serialize on one contract        |
 
 ### UTXO Management Guidelines
 
@@ -47,16 +48,17 @@ The idiomatic approach separates responsibilities across layers. Not everything 
 
 ### Daml Finance Layers
 
-| Layer | Responsibility | Examples |
-|---|---|---|
-| **Core (Holding)** | Ownership, custody, fungibility | Split, Merge, Transfer choices on the holding |
-| **Asset (Instrument)** | Economic terms, contractual semantics | Token metadata, cash flow definitions |
-| **Settlement (Workflow)** | Multi-party transaction coordination | Batch, Instruction contracts; deposit/withdraw flows |
-| **Lifecycle** | Instrument evolution over time | Contractual events, elections |
+| Layer                     | Responsibility                        | Examples                                             |
+| ------------------------- | ------------------------------------- | ---------------------------------------------------- |
+| **Core (Holding)**        | Ownership, custody, fungibility       | Split, Merge, Transfer choices on the holding        |
+| **Asset (Instrument)**    | Economic terms, contractual semantics | Token metadata, cash flow definitions                |
+| **Settlement (Workflow)** | Multi-party transaction coordination  | Batch, Instruction contracts; deposit/withdraw flows |
+| **Lifecycle**             | Instrument evolution over time        | Contractual events, elections                        |
 
 ### Where Choices Should Live
 
 **On the Holding template (asset-level):**
+
 - `Split` — break one holding into two
 - `Merge` — combine two holdings into one
 - `Transfer` — change ownership
@@ -64,6 +66,7 @@ The idiomatic approach separates responsibilities across layers. Not everything 
 These are exposed via Daml Finance interfaces: `Fungible` and `Transferable`.
 
 **On the Orchestrator/Workflow contract:**
+
 - Deposit flow (MPC verification -> credit holding)
 - Withdrawal flow (debit holding -> MPC execution -> confirm/refund)
 - Settlement coordination (Batch + Instruction pattern)
@@ -72,6 +75,7 @@ These are exposed via Daml Finance interfaces: `Fungible` and `Transferable`.
 The orchestrator **exercises choices on holdings**, not the other way around.
 
 **On the Account contract:**
+
 - Access control: who can send/receive holdings
 - Incoming/outgoing transfer controllers
 
@@ -126,15 +130,15 @@ Owner pre-authorizes specific operations via a delegation contract. The issuer c
 
 ### What we have (`Erc20Vault.daml`)
 
-| Concern | Current Location | Idiomatic Location |
-|---|---|---|
-| Split / Merge | Missing entirely | `Erc20Holding` (issuer or co-signed) |
-| Transfer | Missing entirely | `Erc20Holding` (via Transferable) |
-| Balance invariant | No `ensure` clause | `ensure amount > 0` on `Erc20Holding` |
-| Deposit workflow | `VaultOrchestrator` | `VaultOrchestrator` (correct) |
-| Withdrawal workflow | `VaultOrchestrator` | `VaultOrchestrator` (correct) |
-| MPC verification | `VaultOrchestrator` | `VaultOrchestrator` (correct) |
-| EVM params encoding | `Crypto` module | `Crypto` module (correct) |
+| Concern             | Current Location    | Idiomatic Location                    |
+| ------------------- | ------------------- | ------------------------------------- |
+| Split / Merge       | Missing entirely    | `Erc20Holding` (issuer or co-signed)  |
+| Transfer            | Missing entirely    | `Erc20Holding` (via Transferable)     |
+| Balance invariant   | No `ensure` clause  | `ensure amount > 0` on `Erc20Holding` |
+| Deposit workflow    | `VaultOrchestrator` | `VaultOrchestrator` (correct)         |
+| Withdrawal workflow | `VaultOrchestrator` | `VaultOrchestrator` (correct)         |
+| MPC verification    | `VaultOrchestrator` | `VaultOrchestrator` (correct)         |
+| EVM params encoding | `Crypto` module     | `Crypto` module (correct)             |
 
 ### Gaps to Address
 
@@ -213,6 +217,7 @@ template Erc20Holding
 ```
 
 Key points:
+
 - A template can implement **multiple interfaces** (e.g., both `Fungible` and `Transferable`)
 - Each interface requires its own `interface instance ... for ... where` block
 - The `view` method is mandatory — it returns a read-only projection of the contract via a dedicated view data type
@@ -235,6 +240,7 @@ For our `Erc20Holding` where `signatory issuer`, only the issuer (or parties aut
 #### Option A: Implement Splice Token Standard Interfaces (CIP-56)
 
 The Canton Network token standard (CIP-56) defines interfaces in the `Splice.Api.Token` namespace:
+
 - `Splice.Api.Token.HoldingV1` — core holding with Lock, Unlock, Transfer, Split, Merge
 - `Splice.Api.Token.TransferInstructionV1` — transfer workflow
 - `Splice.Api.Token.MetadataV1` — token metadata
@@ -242,12 +248,14 @@ The Canton Network token standard (CIP-56) defines interfaces in the `Splice.Api
 You write your own template and implement these interfaces. This gives you full ecosystem interop (wallets, registries, settlement).
 
 **Pros:**
+
 - Full Canton Network interoperability
 - Wallet providers can discover and manage your holdings
 - Standard Split/Merge/Transfer/Lock choices come "for free" via the interface contract
 - You keep full control of your template fields and custom choices (MPC logic)
 
 **Cons:**
+
 - You must implement all required interface methods yourself
 - Must import the `splice-api-token-holding-v1` DAR as a dependency in `daml.yaml`
 - More upfront work to satisfy the full interface
@@ -255,6 +263,7 @@ You write your own template and implement these interfaces. This gives you full 
 #### Option B: Implement Daml Finance Interfaces (V4)
 
 The Daml Finance library defines interfaces in `Daml.Finance.Interface.Holding.V4`:
+
 - `Holding.I` — base holding
 - `Fungible.I` — split/merge
 - `Transferable.I` — ownership transfer
@@ -266,11 +275,13 @@ The Daml Finance library defines interfaces in `Daml.Finance.Interface.Holding.V
 Define minimal `Fungible` and `Transferable` interfaces in your own project. Your `Erc20Holding` implements them. No external dependencies needed.
 
 **Pros:**
+
 - Zero dependency overhead — works with your current `daml.yaml`
 - Full control, easy to understand
 - Can migrate to CIP-56 interfaces later by adding the interface instances (Smart Contract Upgrades in Canton 3.3+)
 
 **Cons:**
+
 - No ecosystem interop out of the box
 - Must write and maintain the interface definitions yourself
 
