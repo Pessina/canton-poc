@@ -29,7 +29,7 @@ wrapped ERC-20 balance.
  |                              |                              |                              |
  |                              | creates PendingEvmDeposit    |                              |
  |                              | (path, evmParams,            |                              |
- |                              |  requester = predecessorId)  |                              |
+ |                              |  requester, packageId)       |                              |
  |                              |                              |                              |
  |                              | observes PendingEvmDeposit   |                              |
  |                              |----------------------------->|                              |
@@ -130,29 +130,27 @@ data EvmTransactionParams = EvmTransactionParams
   deriving (Eq, Show)
 ```
 
-The MPC and user reconstruct calldata deterministically from
+The MPC reconstruct calldata deterministically from
 `functionSignature` + `args`. `RequestEvmDeposit` validates the function
 signature and that the transfer recipient (`args[0]`) is the vault sweep
 address (see choice below).
 
 ### `PendingEvmDeposit` (Erc20Vault.daml)
 
-Anchor contract for the deposit lifecycle. The MPC reads `requester` and uses
-it as the `predecessorId` for key derivation — authenticated by Canton's
-`controller` requirement and cannot be spoofed.
-
-The `caip2Id` is derived on-chain from `evmParams.chainId` as
-`"eip155:" <> chainIdToDecimalText evmParams.chainId`.
+Anchor contract for the deposit lifecycle.
 
 ```daml
 template PendingEvmDeposit
   with
-    issuer    : Party
-    requester : Party        -- MPC uses as predecessorId for key derivation
-    requestId : BytesHex
-    path      : Text         -- user-supplied derivation sub-path
-    evmParams : EvmTransactionParams
-    packageId : Text         -- user-supplied, MPC verifies against event.templateId
+    issuer     : Party        -- the party that operates the vault
+    requester  : Party        -- the user initiating the deposit
+    requestId  : BytesHex
+    path       : Text         -- user-supplied derivation sub-path
+    evmParams  : EvmTransactionParams
+    packageId  : Text         -- user-supplied, MPC verifies against event.templateId
+    keyVersion : Int          -- e.g., 1
+    algo       : Text         -- e.g., "ECDSA"
+    dest       : Text         -- e.g., "ethereum"
   where
     signatory issuer
     observer requester
@@ -218,6 +216,9 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
     path        : Text
     evmParams   : EvmTransactionParams
     packageId   : Text         -- user-supplied, MPC cross-checks against ledger
+    keyVersion  : Int          -- e.g, 1
+    algo        : Text         -- e.g., "ECDSA"
+    dest        : Text         -- e.g., "ethereum"
   controller issuer, requester
   do
     assertMsg "Only ERC20 transfer allowed"
@@ -226,31 +227,25 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
       (evmParams.args !! 0 == vaultAddress)
 
     let sender = partyToText requester
+    let issuerText = partyToText issuer
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
-    let requestId = computeRequestId sender evmParams caip2Id 1 path packageId
+    let requestId = computeRequestId sender issuerText evmParams caip2Id keyVersion path algo dest packageId
     create PendingEvmDeposit with
-      issuer; requester; requestId; path; evmParams; packageId
+      issuer; requester; requestId; path; evmParams; packageId; keyVersion; algo; dest
 ```
 
-`keyVersion = 1` is hardcoded. `algo`, `dest`, `params` are hardcoded inside
-`computeRequestId` (`"ECDSA"`, `"ethereum"`, `""`).
-
-**packageId binding:** The user supplies `packageId` as a choice argument. The MPC cross-checks the
-user-supplied value against the `CreatedEvent.templateId` from the ledger
-(`event.templateId.split(":")[0]`). If the user lied, the MPC drops the
-request and does not sign.
-
-The `packageId` is included in `computeRequestId`, so the requestId is
-cryptographically bound to a specific package — multiple `VaultOrchestrator`
-deployments produce unique requestIds even with the same `(requester,
-evmParams, path)`, as long as the issuer deploys a single contract package
-per instance.
-
+The MPC
+cross-checks the user-supplied `packageId` against `CreatedEvent.templateId`
+from the ledger; if mismatched, the request is dropped. Since
+packageId + issuer feeds into key derivation and
+into `computeRequestId`, different issuers deploying their own
+`VaultOrchestrator` produce both unique deposit addresses and unique
+requestIds — no collision between independent deployments.
 **Key derivation (predecessorId + path):** For `deriveChildPublicKey`, the MPC
 and user use:
 
-- **predecessorId** = packageId (verified by MPC against ledger event metadata)
-- **path** = `partyToText requester`
+- **predecessorId** = packageId + issuer
+- **path** = requester + user-supplied `path` argument
 
 **`SignEvmTx`** — MPC posts its EVM transaction signature.
 
@@ -335,19 +330,20 @@ packParams p =
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
 
--- | Request ID = keccak256(encodePacked(sender, payload, caip2Id,
+-- | Request ID = keccak256(encodePacked(sender, issuer, payload, caip2Id,
 -- keyVersion, path, algo, dest, packageId)).
-computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> BytesHex
-computeRequestId sender evmParams caip2Id keyVersion path packageId =
+computeRequestId : Text -> Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> BytesHex
+computeRequestId sender issuer evmParams caip2Id keyVersion path algo dest packageId =
   let payload = packParams evmParams
   in keccak256
     ( toHex sender
+      <> toHex issuer
       <> payload
       <> toHex caip2Id
       <> uint32ToHex keyVersion
       <> toHex path
-      <> toHex "ECDSA"
-      <> toHex "ethereum"
+      <> toHex algo
+      <> toHex dest
       <> toHex packageId
     )
 ```
@@ -366,10 +362,11 @@ state from Sepolia during signing. Only reads Sepolia for receipt verification.
 On PendingEvmDeposit created:
 
   Phase 0: Verify packageId and extract key derivation params
-    0a. predecessorId = event.templateId.split(":")[0]  (packageId from ledger)
-    0b. Verify event.packageId == pending.packageId
+    0a. packageId = event.templateId.split(":")[0]       (from ledger)
+    0b. Verify packageId == pending.packageId
         If mismatch → DROP request, do not sign
-    0c. path = requester                                 (partyId string)
+    0c. predecessorId = packageId + issuer
+        path = requester + pending.path
         caip2Id = "eip155:" + decimal(evmParams.chainId)
 
   Phase 1: Sign the EVM transaction
@@ -399,8 +396,8 @@ the signed transaction to Sepolia, and claims the deposit on Canton.
 
 ```
 1. packageId = from codegen export or prior event's templateId
-   predecessorId = packageId
-   path = partyToText requester
+   predecessorId = packageId + issuer
+   path = requester + user-supplied path
 2. Derive deposit address from MPC public key + (predecessorId, path)
 3. Derive vault (centralized) address from MPC public key + (predecessorId, "root")
 4. Build evmParams: to=ERC20 contract, args=[vaultAddr, amount] (transfer call)
@@ -463,11 +460,14 @@ nonconsuming choice ApproveDepositAuth : ContractId DepositAuthorization
 ```daml
 nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
   with
-    requester : Party
-    path      : Text
-    evmParams : EvmTransactionParams
-    packageId : Text
-    authCid   : ContractId DepositAuthorization
+    requester  : Party
+    path       : Text
+    evmParams  : EvmTransactionParams
+    packageId  : Text
+    keyVersion : Int
+    algo       : Text
+    dest       : Text
+    authCid    : ContractId DepositAuthorization
   controller requester
   do
     auth <- fetch authCid
@@ -484,8 +484,8 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
       (evmParams.args !! 0 == vaultAddress)
 
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
-    let requestId = computeRequestId (partyToText requester) evmParams caip2Id 1 path packageId
-    create PendingEvmDeposit with issuer; requester; requestId; path; evmParams; packageId
+    let requestId = computeRequestId (partyToText requester) (partyToText issuer) evmParams caip2Id keyVersion path algo dest packageId
+    create PendingEvmDeposit with issuer; requester; requestId; path; evmParams; packageId; keyVersion; algo; dest
 ```
 
 **Alternative: Propose and Accept.** Instead of the issuer pushing cards, the
