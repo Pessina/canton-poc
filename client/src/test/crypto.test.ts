@@ -48,13 +48,13 @@ describe("packParams", () => {
 // ---------------------------------------------------------------------------
 describe("computeRequestId", () => {
   it("is deterministic", () => {
-    const a = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
-    const b = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
+    const a = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH, "ECDSA", "ethereum", "", "");
+    const b = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH, "ECDSA", "ethereum", "", "");
     expect(a).toBe(b);
   });
 
   it("produces 32-byte hash", () => {
-    const hash = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH);
+    const hash = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH, "ECDSA", "ethereum", "", "");
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });

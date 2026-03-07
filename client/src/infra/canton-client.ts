@@ -209,6 +209,7 @@ async function submitAndWait(
   userId: string,
   actAs: string[],
   commands: Command[],
+  readAs?: string[],
 ): Promise<TransactionResponse> {
   const { data, error } = await client.POST("/v2/commands/submit-and-wait-for-transaction", {
     body: {
@@ -217,7 +218,7 @@ async function submitAndWait(
         commandId: crypto.randomUUID(),
         userId,
         actAs,
-        readAs: actAs,
+        readAs: readAs ?? actAs,
       },
     } as components["schemas"]["JsSubmitAndWaitForTransactionRequest"],
   });
@@ -270,10 +271,11 @@ export async function exerciseChoice(
   contractId: string,
   choice: string,
   choiceArgument: Record<string, unknown>,
+  readAs?: string[],
 ): Promise<TransactionResponse> {
   return submitAndWait(userId, actAs, [
     { ExerciseCommand: { templateId, contractId, choice, choiceArgument } },
-  ]);
+  ], readAs);
 }
 
 // ---------------------------------------------------------------------------

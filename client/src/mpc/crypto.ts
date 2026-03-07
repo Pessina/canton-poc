@@ -34,7 +34,7 @@ export function packParams(p: EvmTransactionParams): string {
 }
 
 /**
- * Compute request_id using the full 8-field formula matching
+ * Compute request_id using the 9-field formula matching
  * signet.js's getRequestIdBidirectional encodePacked layout.
  *
  * encodePacked(
@@ -43,9 +43,10 @@ export function packParams(p: EvmTransactionParams): string {
  *   string caip2Id,
  *   uint32 keyVersion,
  *   string path,
- *   string algo,     // "ECDSA"
- *   string dest,     // "ethereum"
- *   string params    // ""
+ *   string algo,
+ *   string dest,
+ *   string contractId,
+ *   string authContractId,
  * )
  */
 export function computeRequestId(
@@ -54,6 +55,10 @@ export function computeRequestId(
   caip2Id: string,
   keyVersion: number,
   path: string,
+  algo: string,
+  dest: string,
+  contractId: string,
+  authContractId: string,
 ): Hex {
   const payload = packParams(evmParams);
 
@@ -63,9 +68,10 @@ export function computeRequestId(
     stringToHex(caip2Id).slice(2) +
     numberToHex(keyVersion, { size: 4 }).slice(2) +
     stringToHex(path).slice(2) +
-    stringToHex("ECDSA").slice(2) +
-    stringToHex("ethereum").slice(2);
-  // params = "" -> empty bytes
+    stringToHex(algo).slice(2) +
+    stringToHex(dest).slice(2) +
+    stringToHex(contractId).slice(2) +
+    stringToHex(authContractId).slice(2);
 
   return keccak256(`0x${packed}`);
 }

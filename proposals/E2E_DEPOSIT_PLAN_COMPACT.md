@@ -209,8 +209,8 @@ Anchor contract for the deposit lifecycle.
 template PendingEvmDeposit
   with
     issuer         : Party        -- the party that operates the vault
-    mpc            : Party        -- the MPC signing service party
     requester      : Party        -- the user initiating the deposit
+    mpc            : Party        -- the MPC signing service party
     requestId      : BytesHex
     path           : Text         -- user-supplied derivation sub-path
     evmParams      : EvmTransactionParams
@@ -299,6 +299,7 @@ nonconsuming choice ApproveDepositAuth : ContractId DepositAuthorization
   controller issuer
   do
     proposal <- fetch proposalCid
+    assertMsg "Proposal issuer mismatch" (proposal.issuer == issuer)
     archive proposalCid
     create DepositAuthorization with
       issuer; mpc; owner = proposal.owner; remainingUses
@@ -323,24 +324,28 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
   controller requester
   do
     auth <- fetch authCid
-    assertMsg "Auth issuer mismatch" (auth.issuer == issuer)
-    assertMsg "Auth owner mismatch"  (auth.owner == requester)
-    assertMsg "No remaining uses"    (auth.remainingUses > 0)
+    assertMsg "Auth card issuer mismatch" (auth.issuer == issuer)
+    assertMsg "Auth card owner mismatch" (auth.owner == requester)
+    assertMsg "Auth card has no remaining uses" (auth.remainingUses > 0)
     archive authCid
     when (auth.remainingUses > 1) do
       void $ create auth with remainingUses = auth.remainingUses - 1
 
+    let recipientArg = case evmParams.args of
+          recipient :: _ -> recipient
+          [] -> ""
+
     assertMsg "Only ERC20 transfer allowed"
       (evmParams.functionSignature == "transfer(address,uint256)")
     assertMsg "Transfer recipient must be vault address"
-      (evmParams.args !! 0 == vaultAddress)
+      (recipientArg == vaultAddress)
 
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
     let requestId = computeRequestId
           (partyToText requester) evmParams caip2Id keyVersion
           path algo dest contractId authContractId
     create PendingEvmDeposit with
-      issuer; mpc; requester; requestId; path; evmParams
+      issuer; requester; mpc; requestId; path; evmParams
       contractId; authContractId; keyVersion; algo; dest
 ```
 
@@ -405,6 +410,7 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
   do
     pending <- fetch pendingCid
     outcome <- fetch outcomeCid
+    ecdsa   <- fetch ecdsaCid
 
     assertMsg "Pending issuer mismatch"
       (pending.issuer == issuer)
@@ -424,26 +430,67 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
     assertMsg "Invalid MPC signature on deposit response"
       (secp256k1WithEcdsaOnly outcome.signature responseHash mpcPublicKey)
 
+    let amount = (pending.evmParams).args !! 1
+
     archive pendingCid
     archive outcomeCid
     archive ecdsaCid
 
     create Erc20Holding with
       issuer
-      owner        = requester
+      owner = pending.requester
       erc20Address = (pending.evmParams).to
-      amount       = (pending.evmParams).args !! 1
+      amount
 ```
 
 ### Crypto Functions (Crypto.daml)
 
+Uses EIP-712-style domain-separated hashing to eliminate `abi.encodePacked`
+collision vectors. Every dynamic field (`Text`, variable-length `BytesHex`,
+lists) is `keccak256`-hashed first, producing a fixed 32-byte contribution.
+This prevents the classic boundary ambiguity where `("a","bc")` and `("ab","c")`
+pack to identical bytes.
+
+**Design rules:**
+
+1. **Domain tags** — each hash includes a versioned type tag
+   (`"EvmTransactionParamsV1"`, `"CantonMpcDepositRequestV1"`,
+   `"CantonMpcResponseV1"`) to prevent cross-protocol collisions.
+2. **Dynamic fields** — `hashText t = keccak256 (toHex t)` — always 32 bytes.
+3. **Lists** — `hashBytesList xs = keccak256 (foldl (<>) "" (map keccak256 xs))`
+   — each element hashed individually (32 bytes), then concatenation hashed.
+   Eliminates list-count and per-element length ambiguity.
+4. **Fixed-width fields** — `padHex` to 32 bytes (addresses left-padded to 32,
+   not 20, following EIP-712 convention).
+5. **Nested structs** — `EvmTransactionParams` is hashed separately with its
+   own type tag, producing a single 32-byte contribution to the outer hash.
+
 ```daml
--- | abi_encode_packed equivalent for EVM transaction fields.
-packParams : EvmTransactionParams -> BytesHex
-packParams p =
-  padHex p.to 20
-    <> toHex p.functionSignature
-    <> foldl (<>) "" p.args
+-- Domain tags
+evmParamsTypeHash : BytesHex
+evmParamsTypeHash = keccak256 (toHex "EvmTransactionParamsV1")
+
+requestTypeHash : BytesHex
+requestTypeHash = keccak256 (toHex "CantonMpcDepositRequestV1")
+
+responseTypeHash : BytesHex
+responseTypeHash = keccak256 (toHex "CantonMpcResponseV1")
+
+-- Helpers
+hashText : Text -> BytesHex
+hashText t = keccak256 (toHex t)
+
+hashBytesList : [BytesHex] -> BytesHex
+hashBytesList xs = keccak256 (foldl (<>) "" (map keccak256 xs))
+
+-- | EIP-712-style struct hash for EvmTransactionParams.
+hashEvmParams : EvmTransactionParams -> BytesHex
+hashEvmParams p =
+  keccak256 $
+       evmParamsTypeHash
+    <> padHex p.to 32
+    <> hashText p.functionSignature
+    <> hashBytesList p.args
     <> padHex p.value          32
     <> padHex p.nonce          32
     <> padHex p.gasLimit       32
@@ -451,26 +498,26 @@ packParams p =
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
 
--- | Request ID = keccak256(encodePacked(sender, payload, caip2Id,
--- keyVersion, path, algo, dest, contractId, authContractId)).
+-- | Compute request_id using domain-separated hashing.
+-- Every field contributes exactly 32 bytes (or 4 bytes for keyVersion).
 computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> Text -> BytesHex
 computeRequestId sender evmParams caip2Id keyVersion path algo dest contractId authContractId =
-  let payload = packParams evmParams
-  in keccak256
-    ( toHex sender
-      <> payload
-      <> toHex caip2Id
-      <> uint32ToHex keyVersion
-      <> toHex path
-      <> toHex algo
-      <> toHex dest
-      <> toHex contractId
-      <> toHex authContractId
-    )
+  keccak256 $
+       requestTypeHash
+    <> hashText sender
+    <> hashEvmParams evmParams
+    <> hashText caip2Id
+    <> uint32ToHex keyVersion
+    <> hashText path
+    <> hashText algo
+    <> hashText dest
+    <> hashText contractId
+    <> hashText authContractId
 
--- | Compute response_hash = keccak256(request_id || serialized_output).
+-- | Compute response_hash with domain separator.
 computeResponseHash : BytesHex -> BytesHex -> BytesHex
-computeResponseHash requestId output = keccak256 (requestId <> output)
+computeResponseHash requestId output =
+  keccak256 (responseTypeHash <> requestId <> output)
 ```
 
 ## Open Questions

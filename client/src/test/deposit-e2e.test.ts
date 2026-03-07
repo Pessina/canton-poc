@@ -35,6 +35,8 @@ const ERC20_HOLDING = Erc20Holding.templateId;
 
 const VAULT_PATH = "root";
 const KEY_VERSION = 1;
+const ALGO = "ECDSA";
+const DEST = "ethereum";
 
 function buildSampleEvmParams(vaultAddress: Hex): EvmTransactionParams {
   return {
@@ -90,6 +92,7 @@ function packageIdFromTemplateId(templateId: string): string {
 // ---------------------------------------------------------------------------
 let issuer: string;
 let depositor: string;
+let mpc: string;
 const RUN_ID = Math.random().toString(36).slice(2, 8);
 const ADMIN_USER = `e2e-${RUN_ID}`;
 
@@ -99,8 +102,9 @@ beforeAll(async () => {
 
   issuer = await allocateParty(`Issuer_${RUN_ID}`);
   depositor = await allocateParty(`Depositor_${RUN_ID}`);
+  mpc = await allocateParty(`Mpc_${RUN_ID}`);
 
-  await createUser(ADMIN_USER, issuer, [depositor]);
+  await createUser(ADMIN_USER, issuer, [depositor, mpc]);
 }, 30_000);
 
 // ---------------------------------------------------------------------------
@@ -117,15 +121,41 @@ describe("deposit e2e lifecycle", () => {
     // Step 1: Create VaultOrchestrator
     const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
+      mpc,
       mpcPublicKey: MPC_PUB_KEY_SPKI,
       vaultAddress: sampleEvmParams.args[0],
     });
     const orchCid = firstCreatedCid(orchResult);
 
-    // Step 2: RequestEvmDeposit
+    // Step 2: Auth card flow — RequestDepositAuth → ApproveDepositAuth
+    // controller is requester; issuer provides visibility via readAs (not actAs)
+    const proposalResult = await exerciseChoice(
+      ADMIN_USER,
+      [depositor],
+      VAULT_ORCHESTRATOR,
+      orchCid,
+      "RequestDepositAuth",
+      { requester: depositor },
+      [issuer],
+    );
+    const proposalCid = firstCreatedCid(proposalResult);
+
+    const approveResult = await exerciseChoice(
+      ADMIN_USER,
+      [issuer],
+      VAULT_ORCHESTRATOR,
+      orchCid,
+      "ApproveDepositAuth",
+      { proposalCid, remainingUses: 3 },
+    );
+    const authEvent = findCreated(approveResult, "DepositAuthorization");
+    expect(authEvent).toBeDefined();
+    const authCid = authEvent!.contractId;
+
+    // Step 3: RequestEvmDeposit (controller requester — only depositor signs)
     const depositResult = await exerciseChoice(
       ADMIN_USER,
-      [issuer, depositor],
+      [depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestEvmDeposit",
@@ -133,7 +163,14 @@ describe("deposit e2e lifecycle", () => {
         requester: depositor,
         path: requesterPath,
         evmParams: sampleEvmParams,
+        contractId: "",
+        authContractId: "",
+        keyVersion: KEY_VERSION,
+        algo: ALGO,
+        dest: DEST,
+        authCid,
       },
+      [issuer],
     );
 
     const pending = findCreated(depositResult, "PendingEvmDeposit");
@@ -147,10 +184,14 @@ describe("deposit e2e lifecycle", () => {
       caip2Id,
       KEY_VERSION,
       requesterPath,
+      ALGO,
+      DEST,
+      "",
+      "",
     );
     expect(tsRequestId.slice(2)).toBe(requestId);
 
-    // Step 3: MPC signs the EVM transaction
+    // Step 4: MPC signs the EVM transaction
     const predecessorId = packageIdFromTemplateId(pending!.templateId);
     const childPrivateKey = deriveChildPrivateKey(
       MPC_ROOT_PRIVATE_KEY,
@@ -163,14 +204,14 @@ describe("deposit e2e lifecycle", () => {
     const txHash = keccak256(serializedUnsigned);
     const { r, s, v } = signEvmTxHash(childPrivateKey, txHash);
 
-    // Step 4: SignEvmTx
+    // Step 5: SignEvmTx
     const signResult = await exerciseChoice(
       ADMIN_USER,
       [issuer],
       VAULT_ORCHESTRATOR,
       orchCid,
       "SignEvmTx",
-      { requestId, r, s, v },
+      { requester: depositor, requestId, r, s, v },
     );
 
     const ecdsaSig = findCreated(signResult, "EcdsaSignature");
@@ -180,7 +221,7 @@ describe("deposit e2e lifecycle", () => {
     expect(ecdsaArgs.r).toBe(r);
     expect(ecdsaArgs.s).toBe(s);
 
-    // Step 5: ProvideEvmOutcomeSig (simulate success = "01")
+    // Step 6: ProvideEvmOutcomeSig (simulate success = "01")
     const mpcOutput = "01";
     const outcomeSig = signMpcResponse(MPC_ROOT_PRIVATE_KEY, requestId, mpcOutput);
 
@@ -190,7 +231,7 @@ describe("deposit e2e lifecycle", () => {
       VAULT_ORCHESTRATOR,
       orchCid,
       "ProvideEvmOutcomeSig",
-      { requestId, signature: outcomeSig, mpcOutput },
+      { requester: depositor, requestId, signature: outcomeSig, mpcOutput },
     );
 
     const outcomeEvent = findCreated(outcomeResult, "EvmTxOutcomeSignature");
@@ -198,33 +239,33 @@ describe("deposit e2e lifecycle", () => {
     const outcomeCid = outcomeEvent!.contractId;
     const ecdsaCid = ecdsaSig!.contractId;
 
-    // Step 6: ClaimEvmDeposit
+    // Step 7: ClaimEvmDeposit (controller requester — only depositor signs)
     const pendingCid = pending!.contractId;
-    const amountFromArgs = BigInt("0x" + sampleEvmParams.args[1]!).toString();
 
     const claimResult = await exerciseChoice(
       ADMIN_USER,
-      [issuer],
+      [depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "ClaimEvmDeposit",
-      { pendingCid, outcomeCid, ecdsaCid },
+      { requester: depositor, pendingCid, outcomeCid, ecdsaCid },
+      [issuer],
     );
 
     const holding = findCreated(claimResult, "Erc20Holding");
     expect(holding).toBeDefined();
     const holdingArgs = getArgs(holding!);
-    expect(parseFloat(holdingArgs.amount as string)).toBe(parseFloat(amountFromArgs));
+    expect(holdingArgs.amount).toBe(sampleEvmParams.args[1]);
     expect(holdingArgs.owner).toBe(depositor);
     expect(holdingArgs.issuer).toBe(issuer);
 
-    // Step 7: Verify via active contracts query
+    // Step 8: Verify via active contracts query
     const activeHoldings = await getActiveContracts([issuer, depositor], ERC20_HOLDING);
     const matchingHolding = activeHoldings.find((c) => {
       const cArgs = c.createArgument as Record<string, unknown>;
       return (
         cArgs.owner === depositor &&
-        parseFloat(cArgs.amount as string) === parseFloat(amountFromArgs)
+        cArgs.amount === sampleEvmParams.args[1]
       );
     });
     expect(matchingHolding).toBeDefined();

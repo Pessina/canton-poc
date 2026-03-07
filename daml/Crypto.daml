@@ -37,10 +37,6 @@ chainIdToDecimalText : BytesHex -> Text
 chainIdToDecimalText hex =
   show (hexToInt hex)
 
--- | Convert hex-encoded unsigned integer to Decimal.
-hexToDecimal : BytesHex -> Decimal
-hexToDecimal hex = intToDecimal (hexToInt hex)
-
 -- | abi_encode_packed: concatenate all EVM params at canonical widths.
 packParams : EvmTransactionParams -> BytesHex
 packParams p =
@@ -54,9 +50,9 @@ packParams p =
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
 
--- | Compute request_id per signet.js 8-field layout.
-computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> BytesHex
-computeRequestId sender evmParams caip2Id keyVersion path =
+-- | Compute request_id per 9-field layout.
+computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> Text -> BytesHex
+computeRequestId sender evmParams caip2Id keyVersion path algo dest contractId authContractId =
   let payload = packParams evmParams
   in keccak256
     ( toHex sender
@@ -64,8 +60,10 @@ computeRequestId sender evmParams caip2Id keyVersion path =
       <> toHex caip2Id
       <> uint32ToHex keyVersion
       <> toHex path
-      <> toHex "ECDSA"
-      <> toHex "ethereum"
+      <> toHex algo
+      <> toHex dest
+      <> toHex contractId
+      <> toHex authContractId
     )
 
 -- | Compute response_hash = keccak256(request_id || serialized_output).

@@ -1,65 +1,135 @@
 module Erc20Vault where
 
+import DA.Action (when, void)
+import DA.List ((!!)  )
 import DA.Crypto.Text (BytesHex, PublicKeyHex, SignatureHex, secp256k1WithEcdsaOnly)
 
 import Types (EvmTransactionParams)
-import Crypto (computeRequestId, computeResponseHash, chainIdToDecimalText, hexToDecimal)
+import Crypto (computeRequestId, computeResponseHash, chainIdToDecimalText)
+
+template DepositAuthProposal
+  with
+    issuer : Party
+    owner  : Party
+  where
+    signatory issuer
+    observer owner
+
+template DepositAuthorization
+  with
+    issuer        : Party
+    mpc           : Party
+    owner         : Party
+    remainingUses : Int
+  where
+    signatory issuer
+    observer mpc, owner
 
 template Erc20Holding
   with
     issuer       : Party
     owner        : Party
     erc20Address : BytesHex
-    amount       : Decimal
+    amount       : BytesHex
   where
     signatory issuer
     observer owner
 
 template PendingEvmDeposit
   with
-    issuer    : Party
-    requester : Party
-    requestId : BytesHex
-    path      : Text
-    evmParams : EvmTransactionParams
+    issuer         : Party
+    requester      : Party
+    mpc            : Party
+    requestId      : BytesHex
+    path           : Text
+    evmParams      : EvmTransactionParams
+    contractId     : Text
+    authContractId : Text
+    keyVersion     : Int
+    algo           : Text
+    dest           : Text
   where
     signatory issuer
-    observer requester
+    observer mpc, requester
 
 template EcdsaSignature
   with
     issuer    : Party
+    requester : Party
     requestId : BytesHex
     r         : BytesHex
     s         : BytesHex
     v         : Int
   where
     signatory issuer
+    observer requester
 
 template EvmTxOutcomeSignature
   with
     issuer    : Party
+    requester : Party
     requestId : BytesHex
     signature : SignatureHex
     mpcOutput : BytesHex
   where
     signatory issuer
+    observer requester
 
 template VaultOrchestrator
   with
     issuer       : Party
+    mpc          : Party
     mpcPublicKey : PublicKeyHex
     vaultAddress : BytesHex
   where
     signatory issuer
+    observer mpc
+
+    nonconsuming choice RequestDepositAuth : ContractId DepositAuthProposal
+      with
+        requester : Party
+      controller requester
+      do
+        create DepositAuthProposal with
+          issuer
+          owner = requester
+
+    nonconsuming choice ApproveDepositAuth : ContractId DepositAuthorization
+      with
+        proposalCid   : ContractId DepositAuthProposal
+        remainingUses : Int
+      controller issuer
+      do
+        proposal <- fetch proposalCid
+        assertMsg "Proposal issuer mismatch" (proposal.issuer == issuer)
+        archive proposalCid
+        create DepositAuthorization with
+          issuer
+          mpc
+          owner = proposal.owner
+          remainingUses
 
     nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
       with
-        requester : Party
-        path      : Text
-        evmParams : EvmTransactionParams
-      controller issuer, requester
+        requester      : Party
+        path           : Text
+        evmParams      : EvmTransactionParams
+        contractId     : Text
+        authContractId : Text
+        keyVersion     : Int
+        algo           : Text
+        dest           : Text
+        authCid        : ContractId DepositAuthorization
+      controller requester
       do
+        auth <- fetch authCid
+        assertMsg "Auth card issuer mismatch" (auth.issuer == issuer)
+        assertMsg "Auth card owner mismatch" (auth.owner == requester)
+        assertMsg "Auth card has no remaining uses" (auth.remainingUses > 0)
+        archive authCid
+        when (auth.remainingUses > 1) do
+          void $ create auth with remainingUses = auth.remainingUses - 1
+
         let recipientArg = case evmParams.args of
               recipient :: _ -> recipient
               [] -> ""
@@ -71,12 +141,14 @@ template VaultOrchestrator
 
         let sender = partyToText requester
         let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
-        let requestId = computeRequestId sender evmParams caip2Id 1 path
+        let requestId = computeRequestId sender evmParams caip2Id keyVersion path algo dest contractId authContractId
         create PendingEvmDeposit with
-          issuer; requester; requestId; path; evmParams
+          issuer; requester; mpc; requestId; path; evmParams
+          contractId; authContractId; keyVersion; algo; dest
 
     nonconsuming choice SignEvmTx : ContractId EcdsaSignature
       with
+        requester : Party
         requestId : BytesHex
         r         : BytesHex
         s         : BytesHex
@@ -84,27 +156,37 @@ template VaultOrchestrator
       controller issuer
       do
         create EcdsaSignature with
-          issuer; requestId; r; s; v
+          issuer; requester; requestId; r; s; v
 
     nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
       with
+        requester : Party
         requestId : BytesHex
         signature : SignatureHex
         mpcOutput : BytesHex
       controller issuer
       do
         create EvmTxOutcomeSignature with
-          issuer; requestId; signature; mpcOutput
+          issuer; requester; requestId; signature; mpcOutput
 
     nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
       with
+        requester   : Party
         pendingCid  : ContractId PendingEvmDeposit
         outcomeCid  : ContractId EvmTxOutcomeSignature
         ecdsaCid    : ContractId EcdsaSignature
-      controller issuer
+      controller requester
       do
         pending <- fetch pendingCid
         outcome <- fetch outcomeCid
+        ecdsa   <- fetch ecdsaCid
+
+        assertMsg "Pending issuer mismatch"
+          (pending.issuer == issuer)
+        assertMsg "Outcome issuer mismatch"
+          (outcome.issuer == issuer)
+        assertMsg "Requester mismatch"
+          (pending.requester == requester)
 
         assertMsg "Request ID mismatch"
           (pending.requestId == outcome.requestId)
@@ -115,14 +197,8 @@ template VaultOrchestrator
         let responseHash = computeResponseHash pending.requestId outcome.mpcOutput
         assertMsg "Invalid MPC signature on deposit response"
           (secp256k1WithEcdsaOnly outcome.signature responseHash mpcPublicKey)
-        let pendingArgs : [BytesHex]
-            pendingArgs = (pending.evmParams).args
-        let amountArg : BytesHex
-            amountArg = case pendingArgs of
-              _ :: amountHex :: _ -> amountHex
-              _ -> "0"
-        assertMsg "Transfer args must include amount" (length pendingArgs > 1)
-        let amount = hexToDecimal amountArg
+
+        let amount = (pending.evmParams).args !! 1
 
         archive pendingCid
         archive outcomeCid

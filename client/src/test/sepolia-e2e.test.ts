@@ -42,6 +42,10 @@ const GAS_LIMIT = 100_000n;
 const POLL_INTERVAL = 5_000;
 const POLL_TIMEOUT = 180_000;
 
+const KEY_VERSION = 1;
+const ALGO = "ECDSA";
+const DEST = "ethereum";
+
 function getCreatedEvent(event: Event): CreatedEvent | undefined {
   if ("CreatedEvent" in event) return event.CreatedEvent;
   return undefined;
@@ -56,6 +60,14 @@ function findCreated(
     return created?.templateId.includes(templateFragment);
   });
   return event ? getCreatedEvent(event) : undefined;
+}
+
+function firstCreatedCid(events: Event[] | undefined): string {
+  const first = events?.[0];
+  if (!first) throw new Error("No events in transaction");
+  const created = getCreatedEvent(first);
+  if (!created) throw new Error("First event is not a CreatedEvent");
+  return created.contractId;
 }
 
 function packageIdFromTemplateId(templateId: string): string {
@@ -87,6 +99,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
   let mpcServer: MpcServer;
   let issuer: string;
   let depositor: string;
+  let mpc: string;
   let orchCid: string;
   let packageId: string;
   let caip2Id: string;
@@ -99,7 +112,8 @@ describeIf("sepolia e2e deposit lifecycle", () => {
 
     issuer = await allocateParty("Issuer");
     depositor = await allocateParty("SepoliaDepositor");
-    await createUser(USER_ID, issuer, [depositor]);
+    mpc = await allocateParty("Mpc");
+    await createUser(USER_ID, issuer, [depositor, mpc]);
 
     const chainIdHex = toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32);
     packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
@@ -110,6 +124,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     const mpcPubKeySpki = toSpkiPublicKey(env!.MPC_ROOT_PUBLIC_KEY);
     const orchResult = await createContract(USER_ID, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
+      mpc,
       mpcPublicKey: mpcPubKeySpki,
       vaultAddress: vaultAddressPadded,
     });
@@ -180,11 +195,36 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       chainId: toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32),
     };
 
+    // ── Auth card flow ──
+    console.log("[e2e] User → Canton: RequestDepositAuth");
+    const proposalResult = await exerciseChoice(
+      USER_ID,
+      [depositor],
+      VAULT_ORCHESTRATOR,
+      orchCid,
+      "RequestDepositAuth",
+      { requester: depositor },
+      [issuer],
+    );
+    const proposalCid = firstCreatedCid(proposalResult.transaction.events);
+
+    console.log("[e2e] Issuer → Canton: ApproveDepositAuth");
+    const approveResult = await exerciseChoice(
+      USER_ID,
+      [issuer],
+      VAULT_ORCHESTRATOR,
+      orchCid,
+      "ApproveDepositAuth",
+      { proposalCid, remainingUses: 1 },
+    );
+    const authEvent = findCreated(approveResult.transaction.events, "DepositAuthorization");
+    const authCid = authEvent!.contractId;
+
     // ── User → Canton: RequestEvmDeposit (evmParams, path=requesterParty) ──
     console.log("[e2e] User → Canton: RequestEvmDeposit");
     const depositResult = await exerciseChoice(
       USER_ID,
-      [issuer, depositor],
+      [depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestEvmDeposit",
@@ -192,7 +232,14 @@ describeIf("sepolia e2e deposit lifecycle", () => {
         requester: depositor,
         path: requesterPath,
         evmParams,
+        contractId: "",
+        authContractId: "",
+        keyVersion: KEY_VERSION,
+        algo: ALGO,
+        dest: DEST,
+        authCid,
       },
+      [issuer],
     );
 
     const pending = findCreated(depositResult.transaction.events, "PendingEvmDeposit");
@@ -234,18 +281,20 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     expect(outcomeArgs.mpcOutput).toBe("01");
     console.log("[e2e] EvmTxOutcomeSignature observed");
 
-    // ── User claims on Canton ──
+    // ── User claims on Canton (controller requester — only depositor signs) ──
     const claimResult = await exerciseChoice(
       USER_ID,
-      [issuer],
+      [depositor],
       VAULT_ORCHESTRATOR,
       orchCid,
       "ClaimEvmDeposit",
       {
+        requester: depositor,
         pendingCid,
         outcomeCid,
         ecdsaCid,
       },
+      [issuer],
     );
 
     const holding = findCreated(claimResult.transaction.events, "Erc20Holding");
@@ -253,7 +302,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     const holdingArgs = holding!.createArgument as Record<string, unknown>;
     expect(holdingArgs.owner).toBe(depositor);
     expect(holdingArgs.issuer).toBe(issuer);
-    expect(parseFloat(holdingArgs.amount as string)).toBe(parseFloat(DEPOSIT_AMOUNT.toString()));
+    expect(holdingArgs.amount).toBe(amountPadded);
 
     const activeHoldings = await getActiveContracts([issuer, depositor], ERC20_HOLDING);
     expect(activeHoldings.some((c) => (c.createArgument as Record<string, unknown>).owner === depositor)).toBe(

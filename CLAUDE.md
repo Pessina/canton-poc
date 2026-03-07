@@ -9,15 +9,19 @@ dpm build
 dpm test
 ```
 
-### TypeScript integration tests
+### TypeScript tests (unit + e2e)
 
-The sandbox must be running in the background before running tests:
+The sandbox must be running before tests. The e2e tests (deposit-e2e, sepolia-e2e) need it; unit tests (crypto, signer, address-derivation) pass without it.
 
 ```bash
-# Terminal 1 — start sandbox (keep running)
+# 1. Build DAR and regenerate codegen (required after Daml changes)
+dpm build
+cd client && pnpm codegen:daml
+
+# 2. Start sandbox in a separate terminal (keep running)
 cd client && pnpm daml:sandbox
 
-# Terminal 2 — run tests
+# 3. Run all tests (unit + e2e)
 cd client && pnpm test
 ```
 

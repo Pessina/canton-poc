@@ -27,6 +27,11 @@ export async function handlePendingEvmDeposit(params: {
   const requestPath = args.path as string;
   const contractRequestId = args.requestId as string;
   const evmParams = args.evmParams as CantonEvmParams;
+  const contractId = args.contractId as string;
+  const authContractId = args.authContractId as string;
+  const keyVersion = args.keyVersion as number;
+  const algo = args.algo as string;
+  const dest = args.dest as string;
   const predecessorId = event.templateId.split(":")[0];
   if (!predecessorId) {
     throw new Error(`Invalid templateId format: ${event.templateId}`);
@@ -39,8 +44,12 @@ export async function handlePendingEvmDeposit(params: {
     requester,
     evmParams as EvmTransactionParams,
     caip2Id,
-    1,
+    keyVersion,
     requestPath,
+    algo,
+    dest,
+    contractId,
+    authContractId,
   );
   if (computedRequestId.slice(2) !== contractRequestId) {
     throw new Error(
@@ -65,6 +74,7 @@ export async function handlePendingEvmDeposit(params: {
 
   console.log(`[MPC] Signing EVM tx, exercising SignEvmTx`);
   await exerciseChoice(userId, actAs, VAULT_ORCHESTRATOR, orchCid, "SignEvmTx", {
+    requester,
     requestId,
     r,
     s,
@@ -106,6 +116,7 @@ export async function handlePendingEvmDeposit(params: {
 
   console.log(`[MPC] Exercising ProvideEvmOutcomeSig`);
   await exerciseChoice(userId, actAs, VAULT_ORCHESTRATOR, orchCid, "ProvideEvmOutcomeSig", {
+    requester,
     requestId,
     signature,
     mpcOutput,
