@@ -1,19 +1,30 @@
 # EVM Deposit Architecture: Canton MPC PoC
 
-ERC20 deposit flow from an EVM chain (Sepolia) into Canton, with two actors:
-the user (initiator + submitter) and the MPC service (Sig Network signer).
-The MPC never writes to Ethereum.
+Mirrors the familiar CEX deposit experience: the user sends tokens to a
+personal **deposit address**, and the system automatically sweeps them into a
+centralized vault — except here the "CEX backend" is a Canton ledger + MPC
+signing service, giving cryptographic proof of every step.
 
 ## What the Demo Does
 
-1. User deposits ERC20 tokens into a **Sig Network controlled deposit address**
-   (derived from the MPC root public key + user-specific derivation path)
-2. User triggers a Canton request to **move funds from the deposit address to a
-   centralized vault address** via an ERC20 `transfer` call
-3. The **Sig Network (MPC) observes** the request on Canton, signs the EVM
-   transaction, and independently verifies the Sepolia outcome
-4. User submits the signed transaction to Sepolia and claims the deposit on
-   Canton once the MPC confirms success
+1. User sends ERC20 tokens to a **deposit address** on Sepolia
+   (derived from the MPC root public key + vault derivation path + user-specific derivation path)
+2. User exercises `RequestEvmDeposit` on Canton to request a **sweep from the
+   deposit address to the vault address**
+   (derived from the MPC root public key + vault derivation path)
+   via an ERC20 `transfer` call
+3. Canton creates a `PendingEvmDeposit`; the MPC Service observes it
+4. MPC Service builds, serializes, and signs the EVM sweep transaction
+5. MPC Service exercises `SignEvmTx` on Canton, creating an `EcdsaSignature`
+6. User observes the `EcdsaSignature`, reconstructs the signed transaction,
+   and submits it to Sepolia via `eth_sendRawTransaction` — this executes the
+   ERC20 `transfer` on-chain, sweeping tokens from the **deposit address** to the
+   **vault address**
+7. MPC Service polls Sepolia for the receipt and verifies `receipt.status === 1`
+8. MPC Service exercises `ProvideEvmOutcomeSig` on Canton, creating an
+   `EvmTxOutcomeSignature`
+9. User observes the outcome signature and exercises `ClaimEvmDeposit` on Canton
+10. Canton archives all evidence contracts and creates an `Erc20Holding`
 
 The result: an `Erc20Holding` contract on Canton representing the user's
 wrapped ERC-20 balance.
@@ -21,63 +32,68 @@ wrapped ERC-20 balance.
 ## Deposit Lifecycle
 
 ```
- User                           Canton                         MPC Service                    Sepolia
+ User                           Canton (VaultOrchestrator)     MPC Service                    Sepolia
  |                              |                              |                              |
- | RequestEvmDeposit            |                              |                              |
- | (evmParams, path, packageId) |                              |                              |
+ | 1. ERC20 transfer            |                              |                              |
+ |                              |                              |                              |
+ |----------------------------------------------------------------------------- transfer ---->|
+ |                              |                              |        (user → deposit addr) |
+ |<---------------------------------------------------------------------------- receipt ------|
+ |                              |                              |                              |
+ | 2. RequestEvmDeposit         |                              |                              |
+ |    (evmParams, path,         |                              |                              |
+ |     contractId)              |                              |                              |
  |----------------------------->|                              |                              |
  |                              |                              |                              |
- |                              | creates PendingEvmDeposit    |                              |
- |                              | (path, evmParams,            |                              |
- |                              |  requester, packageId)       |                              |
+ |                              | 3. creates PendingEvmDeposit |                              |
+ |                              |    (path, evmParams,         |                              |
+ |                              |     requester, contractId)   |                              |
  |                              |                              |                              |
- |                              | observes PendingEvmDeposit   |                              |
+ |                              |    observes PendingEvmDeposit|                              |
  |                              |----------------------------->|                              |
  |                              |                              |                              |
- |                              |                              | buildCalldata                |
- |                              |                              | serializeTx                  |
- |                              |                              | keccak256 -> txHash          |
- |                              |                              | deriveChildKey               |
- |                              |                              | sign(txHash)                 |
+ |                              |                              | 4. buildCalldata             |
+ |                              |                              |    serializeTx               |
+ |                              |                              |    keccak256 -> txHash       |
+ |                              |                              |    deriveChildKey            |
+ |                              |                              |    sign(txHash)              |
  |                              |                              |                              |
- |                              | SignEvmTx                    |                              |
+ |                              |                              | 5. SignEvmTx                 |
  |                              |<------ EcdsaSignature -------|                              |
- |                              | (r, s, v)                    |                              |
+ |                              |        (r, s, v)             |                              |
  |                              |                              |                              |
- | observes EcdsaSignature      |                              |                              |
+ | 6. observes EcdsaSignature   |                              |                              |
  |<-----------------------------|                              |                              |
+ |    reconstructSignedTx       |                              |                              |
+ |    eth_sendRawTransaction    |                              |                              |
+ |----------------------------------------------------------------------------- sweep tx ---->|
+ |                              |                              |  (deposit addr → vault addr) |
+ |<---------------------------------------------------------------------------- receipt ------|
  |                              |                              |                              |
- | reconstructSignedTx          |                              |                              |
- |--------------------------------- eth_sendRawTransaction ---------------------------------->|
- |<----------------------------------------- receipt -----------------------------------------|
- |                              |                              |                              |
- |                              |                              | polls Sepolia                |
- |                              |                              | (knows expected              |
- |                              |                              |  signed tx hash)             |
+ |                              |                              | 7. polls Sepolia             |
+ |                              |                              |    (knows expected           |
+ |                              |                              |     sweep tx hash)           |
  |                              |                              |                              |
  |                              |                              |--- getTransactionReceipt --->|
  |                              |                              |<-----------------------------|
+ |                              |                              |    verify receipt.status     |
  |                              |                              |                              |
- |                              |                              | verify receipt.status        |
- |                              |                              |                              |
- |                              | ProvideEvmOutcomeSig         |                              |
+ |                              |                              | 8. ProvideEvmOutcomeSig      |
  |                              |<--- EvmTxOutcomeSignature ---|                              |
- |                              | (mpc as signatory, mpcOutput)|                              |
+ |                              |    (signature, mpcOutput)    |                              |
  |                              |                              |                              |
- | observes EvmTxOutcomeSig     |                              |                              |
+ | 9. observes EvmTxOutcomeSig  |                              |                              |
  |<-----------------------------|                              |                              |
- |                              |                              |                              |
- | ClaimEvmDeposit              |                              |                              |
+ |    ClaimEvmDeposit           |                              |                              |
  |-- pending, outcome, ecdsa -->|                              |                              |
  |                              |                              |                              |
- |                              | archive PendingEvmDeposit    |                              |
- |                              | archive EvmTxOutcomeSig      |                              |
- |                              | archive EcdsaSignature       |                              |
+ |                              | 10. archive PendingEvmDeposit|                              |
+ |                              |     archive EvmTxOutcomeSig  |                              |
+ |                              |     archive EcdsaSignature   |                              |
  |                              |                              |                              |
- |                              | creates Erc20Holding         |                              |
+ |                              |     creates Erc20Holding     |                              |
  |                              |                              |                              |
  |<------- Erc20Holding --------|                              |                              |
- | assert balance               |                              |                              |
  |                              |                              |                              |
 ```
 
@@ -94,7 +110,8 @@ lifecycle. All evidence contracts (`EcdsaSignature`,
 template VaultOrchestrator
   with
     issuer       : Party          -- the party that operates the vault
-    vaultAddress : BytesHex       -- centralized sweep address (derived from MPC root key + "root" path)
+    mpcPublicKey : PublicKeyHex   -- MPC root public key for signature verification
+    vaultAddress : BytesHex       -- centralized sweep address (derived from MPC root key + vault derivation path)
   where
     signatory issuer
 
@@ -103,10 +120,6 @@ template VaultOrchestrator
     nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
     nonconsuming choice ClaimEvmDeposit      : ContractId Erc20Holding
 ```
-
-`vaultAddress` is the centralized sweep address (derived from MPC root key +
-`"root"` path) — `RequestEvmDeposit` validates that the transfer recipient
-(`args[0]`) matches this address, ensuring all deposits are swept to the vault.
 
 ### `EvmTransactionParams` (Types.daml)
 
@@ -131,9 +144,7 @@ data EvmTransactionParams = EvmTransactionParams
 ```
 
 The MPC reconstruct calldata deterministically from
-`functionSignature` + `args`. `RequestEvmDeposit` validates the function
-signature and that the transfer recipient (`args[0]`) is the vault sweep
-address (see choice below).
+`functionSignature` + `args`.
 
 ### `PendingEvmDeposit` (Erc20Vault.daml)
 
@@ -147,7 +158,7 @@ template PendingEvmDeposit
     requestId  : BytesHex
     path       : Text         -- user-supplied derivation sub-path
     evmParams  : EvmTransactionParams
-    packageId  : Text         -- user-supplied, MPC verifies against event.templateId
+    contractId : Text         -- VaultOrchestrator's contractId, MPC verifies against event
     keyVersion : Int          -- e.g., 1
     algo       : Text         -- e.g., "ECDSA"
     dest       : Text         -- e.g., "ethereum"
@@ -174,19 +185,19 @@ template EcdsaSignature
 
 ### `EvmTxOutcomeSignature` (Erc20Vault.daml)
 
-MPC's attestation of the ETH transaction outcome. The MPC is a signatory,
-so Canton's authorization model guarantees authenticity — no cryptographic
-verification needed on-chain.
+MPC's attestation of the ETH transaction outcome. Contains a
+`secp256k1` signature over `keccak256(requestId || mpcOutput)` — verified
+cryptographically against `mpcPublicKey` in the `ClaimEvmDeposit` choice.
 
 ```daml
 template EvmTxOutcomeSignature
   with
     issuer    : Party
-    mpc       : Party
     requestId : BytesHex
+    signature : SignatureHex   -- secp256k1 over keccak256(requestId || mpcOutput)
     mpcOutput : BytesHex       -- "01" = success
   where
-    signatory issuer, mpc
+    signatory issuer
 ```
 
 ### `Erc20Holding` (Erc20Vault.daml)
@@ -215,7 +226,7 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
     requester   : Party
     path        : Text
     evmParams   : EvmTransactionParams
-    packageId   : Text         -- user-supplied, MPC cross-checks against ledger
+    contractId  : Text         -- VaultOrchestrator's contractId, MPC cross-checks against ledger
     keyVersion  : Int          -- e.g, 1
     algo        : Text         -- e.g., "ECDSA"
     dest        : Text         -- e.g., "ethereum"
@@ -227,24 +238,23 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
       (evmParams.args !! 0 == vaultAddress)
 
     let sender = partyToText requester
-    let issuerText = partyToText issuer
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
-    let requestId = computeRequestId sender issuerText evmParams caip2Id keyVersion path algo dest packageId
+    let requestId = computeRequestId sender evmParams caip2Id keyVersion path algo dest contractId
     create PendingEvmDeposit with
-      issuer; requester; requestId; path; evmParams; packageId; keyVersion; algo; dest
+      issuer; requester; requestId; path; evmParams; contractId; keyVersion; algo; dest
 ```
 
 The MPC
-cross-checks the user-supplied `packageId` against `CreatedEvent.templateId`
-from the ledger; if mismatched, the request is dropped. Since
-packageId + issuer feeds into key derivation and
-into `computeRequestId`, different issuers deploying their own
-`VaultOrchestrator` produce both unique deposit addresses and unique
-requestIds — no collision between independent deployments.
+cross-checks the user-supplied `contractId` against the VaultOrchestrator's
+`CreatedEvent.contractId` from the ledger; if mismatched, the request is
+dropped. Since `contractId` is globally unique per VaultOrchestrator instance,
+it feeds into both key derivation and `computeRequestId` — different
+VaultOrchestrator instances produce unique deposit
+addresses and unique requestIds with no collision.
 **Key derivation (predecessorId + path):** For `deriveChildPublicKey`, the MPC
 and user use:
 
-- **predecessorId** = packageId + issuer
+- **predecessorId** = contractId (VaultOrchestrator's contractId)
 - **path** = requester + user-supplied `path` argument
 
 **`SignEvmTx`** — MPC posts its EVM transaction signature.
@@ -262,20 +272,18 @@ nonconsuming choice SignEvmTx : ContractId EcdsaSignature
       issuer; requestId; r; s; v
 ```
 
-The MPC computes `requestId` itself via the same derivation formula.
-
 **`ProvideEvmOutcomeSig`** — MPC posts the ETH receipt verification proof.
 
 ```daml
 nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
   with
-    mpc       : Party
     requestId : BytesHex
+    signature : SignatureHex
     mpcOutput : BytesHex
-  controller issuer, mpc
+  controller issuer
   do
     create EvmTxOutcomeSignature with
-      issuer; mpc; requestId; mpcOutput
+      issuer; requestId; signature; mpcOutput
 ```
 
 **`ClaimEvmDeposit`** — user triggers claim after observing the outcome
@@ -300,6 +308,10 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
 
     assertMsg "MPC reported ETH transaction failure"
       (outcome.mpcOutput == "01")
+
+    let responseHash = computeResponseHash pending.requestId outcome.mpcOutput
+    assertMsg "Invalid MPC signature on deposit response"
+      (secp256k1WithEcdsaOnly outcome.signature responseHash mpcPublicKey)
 
     let amount = hexToDecimal ((pending.evmParams).args !! 1)
 
@@ -330,22 +342,25 @@ packParams p =
     <> padHex p.maxPriorityFee 32
     <> padHex p.chainId        32
 
--- | Request ID = keccak256(encodePacked(sender, issuer, payload, caip2Id,
--- keyVersion, path, algo, dest, packageId)).
-computeRequestId : Text -> Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> BytesHex
-computeRequestId sender issuer evmParams caip2Id keyVersion path algo dest packageId =
+-- | Request ID = keccak256(encodePacked(sender, payload, caip2Id,
+-- keyVersion, path, algo, dest, contractId)).
+computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> BytesHex
+computeRequestId sender evmParams caip2Id keyVersion path algo dest contractId =
   let payload = packParams evmParams
   in keccak256
     ( toHex sender
-      <> toHex issuer
       <> payload
       <> toHex caip2Id
       <> uint32ToHex keyVersion
       <> toHex path
       <> toHex algo
       <> toHex dest
-      <> toHex packageId
+      <> toHex contractId
     )
+
+-- | Compute response_hash = keccak256(request_id || serialized_output).
+computeResponseHash : BytesHex -> BytesHex -> BytesHex
+computeResponseHash requestId output = keccak256 (requestId <> output)
 ```
 
 ## TypeScript Services
@@ -361,11 +376,11 @@ state from Sepolia during signing. Only reads Sepolia for receipt verification.
 ```
 On PendingEvmDeposit created:
 
-  Phase 0: Verify packageId and extract key derivation params
-    0a. packageId = event.templateId.split(":")[0]       (from ledger)
-    0b. Verify packageId == pending.packageId
+  Phase 0: Verify contractId and extract key derivation params
+    0a. orchCid = VaultOrchestrator's contractId         (from config or CreatedEvent)
+    0b. Verify orchCid == pending.contractId
         If mismatch → DROP request, do not sign
-    0c. predecessorId = packageId + issuer
+    0c. predecessorId = orchCid
         path = requester + pending.path
         caip2Id = "eip155:" + decimal(evmParams.chainId)
 
@@ -385,8 +400,10 @@ On PendingEvmDeposit created:
     10. Poll Sepolia for receipt by tx hash (the user submits independently)
     11. Verify receipt.status === 1
     12. mpcOutput = "01" (success)
-    13. Exercise ProvideEvmOutcomeSig(requestId, mpcOutput)
-        -> creates EvmTxOutcomeSignature on Canton (MPC is signatory)
+    13. responseHash = keccak256(requestId || mpcOutput)
+    14. Sign responseHash with MPC root key -> signature (DER-encoded secp256k1)
+    15. Exercise ProvideEvmOutcomeSig(requestId, signature, mpcOutput)
+        -> creates EvmTxOutcomeSignature on Canton
 ```
 
 ### User Flow (`client/src/scripts/demo.ts`)
@@ -395,14 +412,14 @@ The user drives the deposit end-to-end: creates the request, submits
 the signed transaction to Sepolia, and claims the deposit on Canton.
 
 ```
-1. packageId = from codegen export or prior event's templateId
-   predecessorId = packageId + issuer
+1. orchCid = VaultOrchestrator's contractId (from CreatedEvent)
+   predecessorId = orchCid
    path = requester + user-supplied path
-2. Derive deposit address from MPC public key + (predecessorId, path)
-3. Derive vault (centralized) address from MPC public key + (predecessorId, "root")
+2. Derive deposit address from MPC public key + vault derivation path + user-specific derivation path
+3. Derive vault (centralized) address from MPC public key + vault derivation path
 4. Build evmParams: to=ERC20 contract, args=[vaultAddr, amount] (transfer call)
-5. Exercise RequestEvmDeposit(requester, path, evmParams, packageId)
-   -> creates PendingEvmDeposit on Canton (includes packageId for MPC verification)
+5. Exercise RequestEvmDeposit(requester, path, evmParams, contractId=orchCid)
+   -> creates PendingEvmDeposit on Canton (includes contractId for MPC verification)
 6. Observe EcdsaSignature (MPC signs autonomously)
 7. Reconstruct signed EVM tx from evmParams + (r, s, v)
 8. Submit to Sepolia: eth_sendRawTransaction
@@ -463,7 +480,7 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
     requester  : Party
     path       : Text
     evmParams  : EvmTransactionParams
-    packageId  : Text
+    contractId : Text
     keyVersion : Int
     algo       : Text
     dest       : Text
@@ -484,8 +501,8 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
       (evmParams.args !! 0 == vaultAddress)
 
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
-    let requestId = computeRequestId (partyToText requester) (partyToText issuer) evmParams caip2Id keyVersion path algo dest packageId
-    create PendingEvmDeposit with issuer; requester; requestId; path; evmParams; packageId; keyVersion; algo; dest
+    let requestId = computeRequestId (partyToText requester) evmParams caip2Id keyVersion path algo dest contractId
+    create PendingEvmDeposit with issuer; requester; requestId; path; evmParams; contractId; keyVersion; algo; dest
 ```
 
 **Alternative: Propose and Accept.** Instead of the issuer pushing cards, the

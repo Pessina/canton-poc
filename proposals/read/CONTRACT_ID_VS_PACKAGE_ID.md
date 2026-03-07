@@ -2,9 +2,10 @@
 
 ## Problem
 
-The current `E2E_DEPOSIT_PLAN_COMPACT.md` proposal uses `packageId` (the DAR's
-SHA-256 content hash) as the uniqueness anchor for `computeRequestId` and as
-`predecessorId` for MPC key derivation. This has a critical limitation:
+The current `E2E_DEPOSIT_PLAN_COMPACT.md` proposal uses `packageId` (the DALF's
+SHA-256 content hash — the compiled Daml-LF package, not the DAR container) as
+the uniqueness anchor for `computeRequestId` and as `predecessorId` for MPC key
+derivation. This has a critical limitation:
 
 > "multiple VaultOrchestrator deployments produce unique requestIds even with the
 > same (requester, evmParams, path), **as long as the issuer deploys a single
@@ -69,7 +70,7 @@ instance Show (ContractId a) where
 ```
 
 - [Source: DA/Internal/LF.daml](https://github.com/digital-asset/daml/blob/main/sdk/compiler/damlc/daml-stdlib-src/DA/Internal/LF.daml)
-- [Source: SBuiltinFun.scala](https://github.com/digital-asset/canton/blob/main/community/daml-lf/interpreter/src/main/scala/com/digitalasset/daml/lf/speedy/SBuiltinFun.scala) — `SBContractIdToText` returns `None` in `UpdateMachine`
+- [Source: SBuiltinFun.scala](https://github.com/digital-asset/canton/blob/main/community/daml-lf/interpreter/src/main/scala/com/digitalasset/daml/lf/speedy/SBuiltinFun.scala) — `SBContractIdToText` returns `None` in `UpdateMachine` (note: file may have moved due to repo restructuring; behavior confirmed by forum posts and Issue #8860)
 
 ### Why it's opaque: Canton's transaction pipeline
 
@@ -120,7 +121,7 @@ body executes.
 
 - [Forum: Why showing a contractId on ledger results in `<contract-id>`](https://discuss.daml.com/t/why-showing-a-contractid-on-ledger-results-in-contract-id-value/6397) — cocreature (DA): "contract ids have to be opaque and only support a limited number of operations that are preserved under suffixing (equality & ordering)"
 - [Forum: Display contractid in DAML script](https://discuss.daml.com/t/display-contractid-in-daml-script/1727) — Bernhard (DA): "At the time of interpretation on the participant node, the transaction ID isn't known yet, so the final contract ids are also not known"
-- [GitHub Issue #8860](https://github.com/digital-asset/daml/issues/8860) — `SBToTextContractId` returns None on-ledger by design
+- [GitHub Issue #8860](https://github.com/digital-asset/daml/issues/8860) — discusses display mismatch between `SBToTextContractId` on-ledger (returns `None`) vs off-ledger behavior in Daml Studio
 - [GitHub Issue #9497](https://github.com/digital-asset/daml/issues/9497) — ContractId in keys deprioritized; "would interfere with some optimization we have or plan to have"
 
 ### No proposals to change this
@@ -201,7 +202,7 @@ await exerciseChoice(orchCid, "RequestEvmDeposit", {
 
 > "When a contract is committed to the ledger, it is given a unique contract
 > identifier of type `ContractId`."
-> — [Ledger Structure](https://docs.daml.com/concepts/ledger-model/ledger-structure.html)
+> — [Updates Reference](https://github.com/digital-asset/daml/blob/main/sdk/docs/sharable/sdk/reference/daml/updates.rst) (the `ledger-structure.html` page uses similar but different wording: "The contract ID is a unique identifier of the contract")
 
 The formal model defines only **Create** and **Exercise/Archive** — no "update
 contractId" action exists. Once assigned, a contractId is immutable for the
@@ -236,19 +237,25 @@ Both versions are lowercase hex (`[0-9a-f]`), well within Daml `Text` limits.
 
 ### Ledger API format
 
-- `contractId` is a **required `string` field** on both `CreatedEvent` and
-  `ExercisedEvent` in the Ledger API protobuf
-- Format has been consistent across **all SDK versions from 1.x through 3.x**
+- `contractId` is a `string` field (`string contract_id = 3`) on both
+  `CreatedEvent` and `ExercisedEvent` in the Ledger API protobuf (proto3 has no
+  `required` keyword — all fields are implicitly optional, but this field is
+  always populated by Canton)
+- Format has been consistent across the current v2 API
 - [Ledger API Proto Docs](https://docs.daml.com/app-dev/grpc/proto-docs.html)
-- [Canton 3.4 Proto Docs](https://docs.digitalasset.com/build/3.4/reference/lapi-proto-docs)
 
 ### No deprecation of existing IDs
 
-Daml 3.3's move to "hashing algorithm V2" affects **only new contract
-creation**, not existing IDs. No existing contractId has ever been invalidated
-by a version upgrade.
+The contract ID format has evolved (V1 with `0x00` prefix → V2 with `0x01`
+prefix, as documented in
+[contract-id.rst](https://github.com/digital-asset/canton/blob/main/community/daml-lf/spec/contract-id.rst)),
+but format changes affect **only new contract creation**, not existing IDs. No
+existing contractId has ever been invalidated by a version upgrade.
 
-- [Daml 3.3 Release Notes](https://blog.digitalasset.com/developers/release-notes/canton-daml-3.3-preview)
+Note: Daml 3.3's "hashing algorithm V2" (mentioned in the
+[release notes](https://blog.digitalasset.com/developers/release-notes/canton-daml-3.3-preview))
+refers to **external signing hashing for interactive submission**, not contract
+ID generation — these are separate mechanisms.
 
 ### Formal verification
 
@@ -311,14 +318,14 @@ approach, where the MPC verifies `packageId` against
 | Source | URL |
 |---|---|
 | Ledger Model: Structure | https://docs.daml.com/concepts/ledger-model/ledger-structure.html |
+| Updates Reference (exact quote source) | https://github.com/digital-asset/daml/blob/main/sdk/docs/sharable/sdk/reference/daml/updates.rst |
 | Ledger Model: Integrity | https://docs.daml.com/concepts/ledger-model/ledger-integrity.html |
 | UnicumGenerator Scaladoc | https://docs.daml.com/2.6.5/canton/scaladoc/com/digitalasset/canton/protocol/UnicumGenerator.html |
 | ContractSalt Scaladoc | https://docs.daml.com/canton/scaladoc/com/digitalasset/canton/protocol/ContractSalt.html |
 | Contract ID Spec (contract-id.rst) | https://github.com/digital-asset/canton/blob/main/community/daml-lf/spec/contract-id.rst |
 | Daml-LF Spec (daml-lf-2.rst) | https://github.com/digital-asset/daml/blob/main/sdk/canton/community/daml-lf/spec/daml-lf-2.rst |
 | Ledger API Proto Docs | https://docs.daml.com/app-dev/grpc/proto-docs.html |
-| Canton 3.4 Proto Docs | https://docs.digitalasset.com/build/3.4/reference/lapi-proto-docs |
-| Daml 3.3 Release Notes | https://blog.digitalasset.com/developers/release-notes/canton-daml-3.3-preview |
+| Daml 3.3 Release Notes (external signing V2, not contract ID) | https://blog.digitalasset.com/developers/release-notes/canton-daml-3.3-preview |
 | Formal Verification (Isabelle/HOL) | https://docs.daml.com/canton/architecture/research.html |
 | Canton Whitepaper | https://www.canton.io/publications/canton-whitepaper.pdf |
 
@@ -332,6 +339,8 @@ approach, where the MPC verifies `packageId` against
 | Forum: Contract ID generation | https://discuss.daml.com/t/contract-content-and-contract-id-generation/6923 |
 | Forum: PackageId non-determinism | https://discuss.daml.com/t/packageid-hash-changes-without-daml-code-change/6073 |
 | GitHub: Show instance (DA/Internal/LF.daml) | https://github.com/digital-asset/daml/blob/main/sdk/compiler/damlc/daml-stdlib-src/DA/Internal/LF.daml |
-| GitHub: SBContractIdToText | https://github.com/digital-asset/canton/blob/main/community/daml-lf/interpreter/src/main/scala/com/digitalasset/daml/lf/speedy/SBuiltinFun.scala |
+| GitHub: SBContractIdToText (may have moved in repo restructuring) | https://github.com/digital-asset/canton/blob/main/community/daml-lf/interpreter/src/main/scala/com/digitalasset/daml/lf/speedy/SBuiltinFun.scala |
 | GitHub Issue #8860 | https://github.com/digital-asset/daml/issues/8860 |
 | GitHub Issue #9497 | https://github.com/digital-asset/daml/issues/9497 |
+| Forum: What affects package hash | https://discuss.daml.com/t/what-affects-the-hash-code-of-a-damls-package/7558 |
+| GitHub Issue #3647 (templateId format) | https://github.com/digital-asset/daml/issues/3647 |
