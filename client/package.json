@@ -10,7 +10,6 @@
     "mpc-service": "tsx src/mpc-service/index.ts",
     "relayer": "tsx src/relayer/index.ts",
     "derive-address": "tsx src/scripts/derive-address.ts",
-    "tx-uuid-poc": "tsx src/scripts/tx-uuid-poc.ts",
     "sepolia:preflight": "tsx src/scripts/sepolia-preflight.ts",
     "daml:build": "cd .. && dpm build",
     "daml:test": "cd .. && dpm test",
