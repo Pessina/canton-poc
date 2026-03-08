@@ -40,7 +40,7 @@ export async function handlePendingEvmDeposit(params: {
   // packageId + issuer ensures different issuers never control the same EVM
   // address via MPC KDF. For per-vault uniqueness, embed an ID in the issuer.
   const predecessorId = `${packageId}${issuer}`;
-  const keyDerivationPath = `${requester}${requestPath}`;
+  const keyDerivationPath = `${requester},${requestPath}`;
 
   // Independently derive requestId from the verified authCid (not user-supplied authCidText)
   const caip2Id = chainIdHexToCaip2(evmParams.chainId);

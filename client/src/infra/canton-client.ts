@@ -29,8 +29,12 @@ const client = createClient<paths>({ baseUrl: BASE_URL });
 export type CreatedEvent = components["schemas"]["CreatedEvent"];
 /** A ledger event — a {@link CreatedEvent}, an ArchivedEvent, or an ExercisedEvent. */
 export type Event = components["schemas"]["Event"];
+/** A single user right record from the user-management API. */
+export type UserRight = components["schemas"]["Right"];
 /** A ledger command (CreateCommand, ExerciseCommand, etc.) sent to the participant. */
 type Command = components["schemas"]["Command"];
+/** A disclosed contract payload for command submission. */
+export type DisclosedContract = components["schemas"]["DisclosedContract"];
 /** Response from `POST /v2/commands/submit-and-wait-for-transaction`. */
 export type TransactionResponse = components["schemas"]["JsSubmitAndWaitForTransactionResponse"];
 
@@ -109,10 +113,50 @@ export async function createUser(
   additionalParties: string[] = [],
 ): Promise<void> {
   const allParties = [primaryParty, ...additionalParties];
-  const rights = allParties.flatMap((party) => [
-    { kind: { CanActAs: { value: { party } } } },
-    { kind: { CanReadAs: { value: { party } } } },
-  ]);
+  const rights = allParties.flatMap((party): UserRight[] => [canActAsRight(party), canReadAsRight(party)]);
+  return createUserWithRights(userId, primaryParty, rights);
+}
+
+/**
+ * Build a `CanActAs` right payload for a party.
+ *
+ * @param party - Fully-qualified party identifier.
+ * @returns A {@link UserRight} granting `CanActAs` for the party.
+ */
+export function canActAsRight(party: string): UserRight {
+  return { kind: { CanActAs: { value: { party } } } };
+}
+
+/**
+ * Build a `CanReadAs` right payload for a party.
+ *
+ * @param party - Fully-qualified party identifier.
+ * @returns A {@link UserRight} granting `CanReadAs` for the party.
+ */
+export function canReadAsRight(party: string): UserRight {
+  return { kind: { CanReadAs: { value: { party } } } };
+}
+
+/**
+ * Create a user with an explicit rights set via `POST /v2/users`.
+ *
+ * Use this when tests need strict least-privilege setups, e.g. a user that can
+ * `CanActAs(requester)` and `CanReadAs(issuer)` but cannot `CanActAs(issuer)`.
+ *
+ * If the user already exists (`USER_ALREADY_EXISTS`), the call is silently ignored.
+ *
+ * @param userId - Unique user identifier (e.g. `"alice-user"`).
+ * @param primaryParty - The user's primary party (fully-qualified).
+ * @param rights - Array of {@link UserRight}s to grant (e.g. `CanActAs`, `CanReadAs`).
+ * @throws If user creation fails for reasons other than duplication.
+ *
+ * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | POST /v2/users}
+ */
+export async function createUserWithRights(
+  userId: string,
+  primaryParty: string,
+  rights: UserRight[],
+): Promise<void> {
   const { error } = await client.POST("/v2/users", {
     body: {
       user: {
@@ -129,6 +173,23 @@ export async function createUser(
     if (msg.includes("USER_ALREADY_EXISTS")) return;
     throw new Error(`createUser failed: ${msg}`);
   }
+}
+
+/**
+ * List all rights currently granted to a user via `GET /v2/users/{user-id}/rights`.
+ *
+ * @param userId - The user whose rights to list.
+ * @returns Array of {@link UserRight}s currently granted.
+ * @throws On communication or server errors.
+ *
+ * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | GET /v2/users/\{user-id\}/rights}
+ */
+export async function listUserRights(userId: string): Promise<UserRight[]> {
+  const { data, error } = await client.GET("/v2/users/{user-id}/rights", {
+    params: { path: { "user-id": userId } },
+  });
+  if (error) throw new Error(`listUserRights failed: ${JSON.stringify(error)}`);
+  return data?.rights ?? [];
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +261,8 @@ export async function uploadDar(darPath: string): Promise<void> {
  * @param commands - Array of ledger {@link Command}s: `CreateCommand`,
  *   `ExerciseCommand`, `CreateAndExerciseCommand`, or `ExerciseByKeyCommand`.
  *   See {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | JSON Ledger API OpenAPI reference}.
+ * @param readAs  - Parties the user is reading as (defaults to `actAs`).
+ * @param disclosedContracts - Disclosed contracts to include in the submission.
  * @returns The confirmed transaction including all resulting events.
  * @throws On command rejection or ledger errors (400 / `JsCantonError`).
  *
@@ -210,6 +273,7 @@ async function submitAndWait(
   actAs: string[],
   commands: Command[],
   readAs?: string[],
+  disclosedContracts?: DisclosedContract[],
 ): Promise<TransactionResponse> {
   const { data, error } = await client.POST("/v2/commands/submit-and-wait-for-transaction", {
     body: {
@@ -219,6 +283,7 @@ async function submitAndWait(
         userId,
         actAs,
         readAs: readAs ?? actAs,
+        disclosedContracts,
       },
     } as components["schemas"]["JsSubmitAndWaitForTransactionRequest"],
   });
@@ -262,6 +327,8 @@ export async function createContract(
  * @param contractId     - Contract ID of the target contract.
  * @param choice         - Name of the choice to exercise (e.g. `"Transfer"`).
  * @param choiceArgument - Choice argument fields matching the Daml record.
+ * @param readAs - Parties the user is reading as (defaults to `actAs`).
+ * @param disclosedContracts - Disclosed contracts to include in the submission.
  * @returns Transaction containing all events produced by the choice.
  */
 export async function exerciseChoice(
@@ -272,10 +339,11 @@ export async function exerciseChoice(
   choice: string,
   choiceArgument: Record<string, unknown>,
   readAs?: string[],
+  disclosedContracts?: DisclosedContract[],
 ): Promise<TransactionResponse> {
   return submitAndWait(userId, actAs, [
     { ExerciseCommand: { templateId, contractId, choice, choiceArgument } },
-  ], readAs);
+  ], readAs, disclosedContracts);
 }
 
 // ---------------------------------------------------------------------------
@@ -346,24 +414,31 @@ export async function getUpdates(
   return data!;
 }
 
+/** A contract from the active set paired with its synchronizer assignment. */
+type ActiveContractEntry = {
+  createdEvent: CreatedEvent;
+  synchronizerId: string;
+};
+
 /**
- * Query active contracts filtered by template ID via `POST /v2/state/active-contracts`.
+ * Shared implementation for querying active contracts via
+ * `POST /v2/state/active-contracts`.
  *
- * Returns all active (non-archived) contracts matching the given `templateId`
- * that are visible to at least one of the specified `parties`.
+ * Returns the {@link CreatedEvent} together with its `synchronizerId` so
+ * callers that need the full {@link DisclosedContract} shape (which requires
+ * `synchronizerId`) can build it without a redundant API call.
  *
  * @param parties - Parties whose visible contracts should be included.
- * @param templateId - Fully-qualified Daml template identifier
- *   (e.g. `"Erc20Vault:Erc20Holding"`).
- * @returns Array of {@link CreatedEvent}s for matching active contracts.
- * @throws On communication or server errors.
- *
- * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | POST /v2/state/active-contracts}
+ * @param templateId - Fully-qualified Daml template identifier.
+ * @param includeCreatedEventBlob - Whether to request the opaque
+ *   `createdEventBlob` on each {@link CreatedEvent}.
+ * @returns Matching active contracts with their synchronizer IDs.
  */
-export async function getActiveContracts(
+async function fetchActiveContracts(
   parties: string[],
   templateId: string,
-): Promise<CreatedEvent[]> {
+  includeCreatedEventBlob: boolean,
+): Promise<ActiveContractEntry[]> {
   const ledgerEnd = await getLedgerEnd();
 
   const filtersByParty: Record<string, components["schemas"]["Filters"]> = {};
@@ -373,7 +448,7 @@ export async function getActiveContracts(
         {
           identifierFilter: {
             TemplateFilter: {
-              value: { templateId, includeCreatedEventBlob: false },
+              value: { templateId, includeCreatedEventBlob },
             },
           },
         },
@@ -390,13 +465,81 @@ export async function getActiveContracts(
       },
     } as components["schemas"]["GetActiveContractsRequest"],
   });
-  if (error) throw new Error(`getActiveContracts failed: ${JSON.stringify(error)}`);
+  if (error) throw new Error(`fetchActiveContracts failed: ${JSON.stringify(error)}`);
 
-  const results: CreatedEvent[] = [];
+  const results: ActiveContractEntry[] = [];
   for (const item of data ?? []) {
     if ("JsActiveContract" in item.contractEntry) {
-      results.push(item.contractEntry.JsActiveContract.createdEvent);
+      const ac = item.contractEntry.JsActiveContract;
+      results.push({ createdEvent: ac.createdEvent, synchronizerId: ac.synchronizerId });
     }
   }
   return results;
+}
+
+/**
+ * Query active contracts filtered by template ID via `POST /v2/state/active-contracts`.
+ *
+ * Returns all active (non-archived) contracts matching the given `templateId`
+ * that are visible to at least one of the specified `parties`.
+ *
+ * @param parties - Parties whose visible contracts should be included.
+ * @param templateId - Fully-qualified Daml template identifier
+ *   (e.g. `"Erc20Vault:Erc20Holding"`).
+ * @param includeCreatedEventBlob - Whether to include the `createdEventBlob`
+ *   in each result (default `false`). Set to `true` when building
+ *   {@link DisclosedContract} payloads.
+ * @returns Array of {@link CreatedEvent}s for matching active contracts.
+ * @throws On communication or server errors.
+ *
+ * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | POST /v2/state/active-contracts}
+ */
+export async function getActiveContracts(
+  parties: string[],
+  templateId: string,
+  includeCreatedEventBlob = false,
+): Promise<CreatedEvent[]> {
+  const entries = await fetchActiveContracts(parties, templateId, includeCreatedEventBlob);
+  return entries.map((e) => e.createdEvent);
+}
+
+/**
+ * Fetch a disclosed-contract payload for a specific active contract.
+ *
+ * Finds a contract by ID within the active set and returns the structure
+ * expected in command `disclosedContracts`.
+ *
+ * @param parties - Parties whose visible contracts should be searched.
+ * @param templateId - Fully-qualified Daml template identifier
+ *   (e.g. `"Erc20Vault:Erc20Holding"`).
+ * @param contractId - Contract ID of the target contract.
+ * @returns A {@link DisclosedContract} payload ready for command submission.
+ * @throws If the contract is not found or is missing its `createdEventBlob`.
+ *
+ * @see {@link https://docs.digitalasset.com/build/3.4/reference/json-api/openapi.html | POST /v2/state/active-contracts}
+ */
+export async function getDisclosedContract(
+  parties: string[],
+  templateId: string,
+  contractId: string,
+): Promise<DisclosedContract> {
+  const entries = await fetchActiveContracts(parties, templateId, true);
+  const entry = entries.find((e) => e.createdEvent.contractId === contractId);
+  if (!entry) {
+    throw new Error(
+      `getDisclosedContract: contract ${contractId} (${templateId}) not found in active set`,
+    );
+  }
+  const { createdEvent, synchronizerId } = entry;
+  if (!createdEvent.createdEventBlob) {
+    throw new Error(
+      `getDisclosedContract: contract ${contractId} is missing createdEventBlob`,
+    );
+  }
+  return {
+    templateId: createdEvent.templateId,
+    contractId: createdEvent.contractId,
+    createdEventBlob: createdEvent.createdEventBlob,
+    synchronizerId,
+  };
 }

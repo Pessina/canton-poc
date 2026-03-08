@@ -6,7 +6,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e:sepolia": "vitest run src/test/sepolia-e2e.test.ts",
-    "demo": "tsx src/scripts/demo.ts",
     "mpc-service": "tsx src/mpc-service/index.ts",
     "relayer": "tsx src/relayer/index.ts",
     "derive-address": "tsx src/scripts/derive-address.ts",

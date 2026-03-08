@@ -11,7 +11,7 @@ dpm test
 
 ### TypeScript tests (unit + e2e)
 
-The sandbox must be running before tests. The e2e tests (deposit-e2e, sepolia-e2e) need it; unit tests (crypto, signer, address-derivation) pass without it.
+The sandbox must be running before tests. The e2e test (sepolia-e2e) needs it; unit tests (crypto, signer, address-derivation) pass without it.
 
 ```bash
 # 1. Build DAR and regenerate codegen (required after Daml changes)

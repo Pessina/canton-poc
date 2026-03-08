@@ -51,14 +51,21 @@ async function main() {
   console.log("── Sepolia E2E Pre-flight ──\n");
 
   await uploadDar(DAR_PATH);
-  const depositor = await allocateParty("SepoliaDepositor");
-  console.log(`Canton depositor party: ${depositor}`);
+  const issuer = await allocateParty("Issuer");
+  const requester = await allocateParty("SepoliaRequester");
+  console.log(`Canton issuer party:    ${issuer}`);
+  console.log(`Canton requester party: ${requester}`);
 
   const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
-  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, depositor);
-  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root");
+  const predecessorId = `${packageId}${issuer}`;
+  const requestPath = requester;
+  const depositDerivationPath = `${requester},${requestPath}`;
+  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, predecessorId, depositDerivationPath);
+  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, predecessorId, "root");
 
   console.log(`Package ID used for derivation: ${packageId}`);
+  console.log(`Predecessor ID: ${predecessorId}`);
+  console.log(`Deposit derivation path: ${depositDerivationPath}`);
 
   // Faucet address — the stable address the user funds once
   if (FAUCET_PRIVATE_KEY) {

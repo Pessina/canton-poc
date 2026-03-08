@@ -8,6 +8,7 @@ import {
   createContract,
   exerciseChoice,
   getActiveContracts,
+  getDisclosedContract,
   type Event,
   type CreatedEvent,
 } from "../infra/canton-client.js";
@@ -18,7 +19,8 @@ import {
   EvmTxOutcomeSignature,
 } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import { MpcServer } from "../mpc-service/server.js";
-import { deriveDepositAddress } from "../mpc/address-derivation.js";
+import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
+import { computeRequestId } from "../mpc/crypto.js";
 import { reconstructSignedTx, submitRawTransaction } from "../evm/tx-builder.js";
 import { loadSepoliaE2eEnv, toSpkiPublicKey } from "./helpers/e2e-env.js";
 import {
@@ -98,9 +100,10 @@ const describeIf = env ? describe : describe.skip;
 describeIf("sepolia e2e deposit lifecycle", () => {
   let mpcServer: MpcServer;
   let issuer: string;
-  let depositor: string;
+  let requester: string;
   let mpc: string;
   let orchCid: string;
+  let orchDisclosure: Awaited<ReturnType<typeof getDisclosedContract>>;
   let packageId: string;
   let vaultAddressPadded: string;
 
@@ -110,9 +113,9 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     await uploadDar(DAR_PATH);
 
     issuer = await allocateParty("Issuer");
-    depositor = await allocateParty("SepoliaDepositor");
+    requester = await allocateParty("SepoliaRequester");
     mpc = await allocateParty("Mpc");
-    await createUser(USER_ID, issuer, [depositor, mpc]);
+    await createUser(USER_ID, issuer, [requester, mpc]);
 
     packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
     const vaultAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, `${packageId}${issuer}`, "root");
@@ -127,6 +130,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     });
     const orchEvent = findCreated(orchResult.transaction.events, "VaultOrchestrator");
     orchCid = orchEvent!.contractId;
+    orchDisclosure = await getDisclosedContract([issuer], VAULT_ORCHESTRATOR, orchCid);
 
     mpcServer = new MpcServer({
       orchCid,
@@ -146,11 +150,11 @@ describeIf("sepolia e2e deposit lifecycle", () => {
 
   it("completes full deposit flow through Sepolia", async () => {
     // ── Pre-flight ──
-    const requesterPath = depositor;
+    const requesterPath = requester;
     const depositAddress = deriveDepositAddress(
       env!.MPC_ROOT_PUBLIC_KEY,
       `${packageId}${issuer}`,
-      `${depositor}${requesterPath}`,
+      `${requester},${requesterPath}`,
     );
     console.log(`[e2e] Deposit address derived: ${depositAddress}`);
 
@@ -195,12 +199,13 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     console.log("[e2e] User → Canton: RequestDepositAuth");
     const proposalResult = await exerciseChoice(
       USER_ID,
-      [depositor],
+      [requester],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestDepositAuth",
-      { requester: depositor },
-      [issuer],
+      { requester },
+      undefined,
+      [orchDisclosure],
     );
     const proposalCid = firstCreatedCid(proposalResult.transaction.events);
 
@@ -220,12 +225,12 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     console.log("[e2e] User → Canton: RequestEvmDeposit");
     const depositResult = await exerciseChoice(
       USER_ID,
-      [depositor],
+      [requester],
       VAULT_ORCHESTRATOR,
       orchCid,
       "RequestEvmDeposit",
       {
-        requester: depositor,
+        requester,
         path: requesterPath,
         evmParams,
         authCidText: authCid,
@@ -234,7 +239,8 @@ describeIf("sepolia e2e deposit lifecycle", () => {
         dest: DEST,
         authCid,
       },
-      [issuer],
+      undefined,
+      [orchDisclosure],
     );
 
     const pending = findCreated(depositResult.transaction.events, "PendingEvmDeposit");
@@ -242,6 +248,20 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     const pendingCid = pending!.contractId;
     const pendingArgs = pending!.createArgument as Record<string, unknown>;
     const requestId = pendingArgs.requestId as string;
+
+    const caip2Id = chainIdHexToCaip2(evmParams.chainId);
+    const tsRequestId = computeRequestId(
+      requester,
+      evmParams,
+      caip2Id,
+      KEY_VERSION,
+      requesterPath,
+      ALGO,
+      DEST,
+      authCid,
+    );
+    expect(tsRequestId.slice(2)).toBe(requestId);
+
     console.log(`[e2e] PendingEvmDeposit created (requestId=${requestId})`);
 
     // ── MPC signs tx on Canton ──
@@ -276,31 +296,32 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     expect(outcomeArgs.mpcOutput).toBe("01");
     console.log("[e2e] EvmTxOutcomeSignature observed");
 
-    // ── User claims on Canton (controller requester — only depositor signs) ──
+    // ── User claims on Canton (controller requester — only requester signs) ──
     const claimResult = await exerciseChoice(
       USER_ID,
-      [depositor],
+      [requester],
       VAULT_ORCHESTRATOR,
       orchCid,
       "ClaimEvmDeposit",
       {
-        requester: depositor,
+        requester,
         pendingCid,
         outcomeCid,
         ecdsaCid,
       },
-      [issuer],
+      undefined,
+      [orchDisclosure],
     );
 
     const holding = findCreated(claimResult.transaction.events, "Erc20Holding");
     expect(holding).toBeDefined();
     const holdingArgs = holding!.createArgument as Record<string, unknown>;
-    expect(holdingArgs.owner).toBe(depositor);
+    expect(holdingArgs.owner).toBe(requester);
     expect(holdingArgs.issuer).toBe(issuer);
     expect(holdingArgs.amount).toBe(amountPadded);
 
-    const activeHoldings = await getActiveContracts([issuer, depositor], ERC20_HOLDING);
-    expect(activeHoldings.some((c) => (c.createArgument as Record<string, unknown>).owner === depositor)).toBe(
+    const activeHoldings = await getActiveContracts([issuer, requester], ERC20_HOLDING);
+    expect(activeHoldings.some((c) => (c.createArgument as Record<string, unknown>).owner === requester)).toBe(
       true,
     );
     console.log("[e2e] All assertions passed");
