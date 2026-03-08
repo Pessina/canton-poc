@@ -114,9 +114,9 @@ describe("deposit e2e lifecycle", () => {
   it("completes the full deposit flow from request to Erc20Holding", async () => {
     const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
     const requesterPath = depositor;
-    const caip2Id = chainIdHexToCaip2("0000000000000000000000000000000000000000000000000000000000aa36a7");
-    const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, `${packageId}${issuer}`, VAULT_PATH, caip2Id);
+    const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, `${packageId}${issuer}`, VAULT_PATH);
     const sampleEvmParams = buildSampleEvmParams(vaultAddress);
+    const caip2Id = chainIdHexToCaip2(sampleEvmParams.chainId);
 
     // Step 1: Create VaultOrchestrator
     const orchResult = await createContract(ADMIN_USER, [issuer], VAULT_ORCHESTRATOR, {
@@ -163,7 +163,7 @@ describe("deposit e2e lifecycle", () => {
         requester: depositor,
         path: requesterPath,
         evmParams: sampleEvmParams,
-        authContractId: authCid,
+        authCidText: authCid,
         keyVersion: KEY_VERSION,
         algo: ALGO,
         dest: DEST,
@@ -194,7 +194,6 @@ describe("deposit e2e lifecycle", () => {
       MPC_ROOT_PRIVATE_KEY,
       `${packageId}${issuer}`,
       `${depositor}${requesterPath}`,
-      chainIdHexToCaip2(sampleEvmParams.chainId),
     );
     const evmParamsForTx: CantonEvmParams = sampleEvmParams;
     const serializedUnsigned = serializeUnsignedTx(evmParamsForTx);

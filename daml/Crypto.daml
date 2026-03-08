@@ -87,7 +87,7 @@ hashEvmParams p =
 
 -- | Compute request_id using domain-separated hashing.
 computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> BytesHex
-computeRequestId sender evmParams caip2Id keyVersion path algo dest authContractId =
+computeRequestId sender evmParams caip2Id keyVersion path algo dest authCidText =
   keccak256 $
        requestTypeHash
     <> hashText sender
@@ -97,7 +97,7 @@ computeRequestId sender evmParams caip2Id keyVersion path algo dest authContract
     <> hashText path
     <> hashText algo
     <> hashText dest
-    <> hashText authContractId
+    <> hashText authCidText
 
 -- | Compute response_hash with domain separator.
 computeResponseHash : BytesHex -> BytesHex -> BytesHex

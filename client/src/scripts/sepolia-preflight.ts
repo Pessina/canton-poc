@@ -20,8 +20,8 @@ import { createPublicClient, http, parseAbi, type Hex } from "viem";
 import { sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { uploadDar, allocateParty } from "../infra/canton-client.js";
-import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
-import { DEPOSIT_AMOUNT, toCantonHex } from "../test/helpers/sepolia-helpers.js";
+import { deriveDepositAddress } from "../mpc/address-derivation.js";
+import { DEPOSIT_AMOUNT } from "../test/helpers/sepolia-helpers.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -55,13 +55,10 @@ async function main() {
   console.log(`Canton depositor party: ${depositor}`);
 
   const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
-  const sepoliaChainIdHex = toCantonHex(11155111n, 32);
-  const caip2Id = chainIdHexToCaip2(sepoliaChainIdHex);
-  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, depositor, caip2Id);
-  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root", caip2Id);
+  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, depositor);
+  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root");
 
   console.log(`Package ID used for derivation: ${packageId}`);
-  console.log(`CAIP-2 used for derivation:      ${caip2Id}`);
 
   // Faucet address — the stable address the user funds once
   if (FAUCET_PRIVATE_KEY) {

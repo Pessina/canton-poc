@@ -18,7 +18,7 @@ import {
   EvmTxOutcomeSignature,
 } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import { MpcServer } from "../mpc-service/server.js";
-import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
+import { deriveDepositAddress } from "../mpc/address-derivation.js";
 import { reconstructSignedTx, submitRawTransaction } from "../evm/tx-builder.js";
 import { loadSepoliaE2eEnv, toSpkiPublicKey } from "./helpers/e2e-env.js";
 import {
@@ -102,7 +102,6 @@ describeIf("sepolia e2e deposit lifecycle", () => {
   let mpc: string;
   let orchCid: string;
   let packageId: string;
-  let caip2Id: string;
   let vaultAddressPadded: string;
 
   const USER_ID = "sepolia-e2e";
@@ -115,10 +114,8 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     mpc = await allocateParty("Mpc");
     await createUser(USER_ID, issuer, [depositor, mpc]);
 
-    const chainIdHex = toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32);
     packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
-    caip2Id = chainIdHexToCaip2(chainIdHex);
-    const vaultAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, `${packageId}${issuer}`, "root", caip2Id);
+    const vaultAddress = deriveDepositAddress(env!.MPC_ROOT_PUBLIC_KEY, `${packageId}${issuer}`, "root");
     vaultAddressPadded = vaultAddress.slice(2).padStart(64, "0");
 
     const mpcPubKeySpki = toSpkiPublicKey(env!.MPC_ROOT_PUBLIC_KEY);
@@ -154,7 +151,6 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       env!.MPC_ROOT_PUBLIC_KEY,
       `${packageId}${issuer}`,
       `${depositor}${requesterPath}`,
-      caip2Id,
     );
     console.log(`[e2e] Deposit address derived: ${depositAddress}`);
 
@@ -232,7 +228,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
         requester: depositor,
         path: requesterPath,
         evmParams,
-        authContractId: authCid,
+        authCidText: authCid,
         keyVersion: KEY_VERSION,
         algo: ALGO,
         dest: DEST,

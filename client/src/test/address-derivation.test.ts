@@ -6,33 +6,22 @@ const MPC_ROOT_PUBLIC_KEY =
 
 const PREDECESSOR_ID = "Issuer::1220abcdef";
 const PATH = "m/44/60/0/0";
-const CAIP2_ID = "eip155:11155111";
 
 describe("deriveDepositAddress", () => {
   it("is deterministic", () => {
-    const a = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
-    const b = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
+    const a = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, PATH);
+    const b = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, PATH);
     expect(a).toBe(b);
   });
 
   it("produces different addresses for different paths", () => {
-    const addr1 = deriveDepositAddress(
-      MPC_ROOT_PUBLIC_KEY,
-      PREDECESSOR_ID,
-      "m/44/60/0/0",
-      CAIP2_ID,
-    );
-    const addr2 = deriveDepositAddress(
-      MPC_ROOT_PUBLIC_KEY,
-      PREDECESSOR_ID,
-      "m/44/60/0/1",
-      CAIP2_ID,
-    );
+    const addr1 = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, "m/44/60/0/0");
+    const addr2 = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, "m/44/60/0/1");
     expect(addr1).not.toBe(addr2);
   });
 
   it("produces valid 20-byte address", () => {
-    const address = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
+    const address = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, PREDECESSOR_ID, PATH);
     expect(address).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 });

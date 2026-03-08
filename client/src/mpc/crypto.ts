@@ -32,8 +32,8 @@ function hashText(t: string): string {
 
 /** Hash a list of hex values (matching Daml's hashBytesList). */
 function hashBytesList(xs: string[]): string {
-  const inner = xs.map((x) => keccak256(`0x${x}` as Hex).slice(2)).join("");
-  return keccak256(`0x${inner}` as Hex).slice(2);
+  const inner = xs.map((x) => keccak256(`0x${x}`).slice(2)).join("");
+  return keccak256(`0x${inner}`).slice(2);
 }
 
 /** Left-pad hex to the given byte width (matching Daml's padHex). */
@@ -57,7 +57,7 @@ export function hashEvmParams(p: EvmTransactionParams): string {
     padHex(p.maxFeePerGas, 32) +
     padHex(p.maxPriorityFee, 32) +
     padHex(p.chainId, 32);
-  return keccak256(`0x${preimage}` as Hex).slice(2);
+  return keccak256(`0x${preimage}`).slice(2);
 }
 
 /**
@@ -72,7 +72,7 @@ export function computeRequestId(
   path: string,
   algo: string,
   dest: string,
-  authContractId: string,
+  authCidText: string,
 ): Hex {
   const packed =
     REQUEST_TYPE_HASH +
@@ -83,9 +83,9 @@ export function computeRequestId(
     hashText(path) +
     hashText(algo) +
     hashText(dest) +
-    hashText(authContractId);
+    hashText(authCidText);
 
-  return keccak256(`0x${packed}` as Hex);
+  return keccak256(`0x${packed}`);
 }
 
 /**

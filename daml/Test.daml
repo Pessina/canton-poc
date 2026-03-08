@@ -144,7 +144,7 @@ test5_depositLifecycle = do
       requester = depositor
       path      = depositPath
       evmParams = sampleEvmParams
-      authContractId = ""
+      authCidText = ""
       keyVersion = 1
       algo = "ECDSA"
       dest = "ethereum"
@@ -300,7 +300,7 @@ testRequestEvmDepositBurnsAuthCard = do
       requester = depositor
       path      = depositPath
       evmParams = sampleEvmParams
-      authContractId = ""
+      authCidText = ""
       keyVersion = 1
       algo = "ECDSA"
       dest = "ethereum"
@@ -345,7 +345,7 @@ testClaimAsRequester = do
       requester = depositor
       path      = depositPath
       evmParams = sampleEvmParams
-      authContractId = ""
+      authCidText = ""
       keyVersion = 1
       algo = "ECDSA"
       dest = "ethereum"
@@ -420,7 +420,7 @@ testClaimRequesterMismatchFails = do
       requester = depositor
       path      = depositPath
       evmParams = sampleEvmParams
-      authContractId = ""
+      authCidText = ""
       keyVersion = 1
       algo = "ECDSA"
       dest = "ethereum"
@@ -479,7 +479,7 @@ testAuthCardNoRemainingUsesFails = do
       requester = depositor
       path      = depositPath
       evmParams = sampleEvmParams
-      authContractId = ""
+      authCidText = ""
       keyVersion = 1
       algo = "ECDSA"
       dest = "ethereum"
@@ -590,13 +590,18 @@ testClaimHappyPath = do
     createCmd VaultOrchestrator with
       issuer; mpc; mpcPublicKey = claimTestPubKey; vaultAddress = sampleVaultAddress
 
+  -- Create a dummy auth for the authCid field
+  dummyAuthCid <- submit issuer do
+    createCmd DepositAuthorization with
+      issuer; mpc; owner = depositor; remainingUses = 0
+
   -- Directly create the evidence contracts with known test vectors
   pendingCid <- submit issuer do
     createCmd PendingEvmDeposit with
       issuer; requester = depositor; mpc
       requestId = claimTestRequestId
       path = "test"; evmParams = sampleEvmParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; authCid = dummyAuthCid; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
 
   ecdsaCid <- submit issuer do
     createCmd EcdsaSignature with
@@ -710,7 +715,7 @@ testAuthCardWrongIssuer = do
   submitMustFail (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestEvmDeposit with
       requester = depositor; path = "test"; evmParams = sampleEvmParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
       authCid
 
 ------------------------------------------------------------------------
@@ -736,7 +741,7 @@ testAuthCardWrongOwner = do
   submitMustFail (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestEvmDeposit with
       requester = depositor; path = "test"; evmParams = sampleEvmParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
       authCid
 
 ------------------------------------------------------------------------
@@ -762,7 +767,7 @@ testWrongFunctionSignature = do
   submitMustFail (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestEvmDeposit with
       requester = depositor; path = "test"; evmParams = badParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
       authCid
 
 ------------------------------------------------------------------------
@@ -791,7 +796,7 @@ testWrongRecipient = do
   submitMustFail (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestEvmDeposit with
       requester = depositor; path = "test"; evmParams = badParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
       authCid
 
 ------------------------------------------------------------------------
@@ -808,11 +813,15 @@ testClaimRejectsMpcFailure = do
     createCmd VaultOrchestrator with
       issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
 
+  dummyAuthCid <- submit issuer do
+    createCmd DepositAuthorization with
+      issuer; mpc; owner = depositor; remainingUses = 0
+
   pendingCid <- submit issuer do
     createCmd PendingEvmDeposit with
       issuer; requester = depositor; mpc
       requestId = "bb"; path = "test"; evmParams = sampleEvmParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; authCid = dummyAuthCid; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
 
   ecdsaCid <- submit issuer do
     createCmd EcdsaSignature with
@@ -841,11 +850,15 @@ testClaimRejectsRequestIdMismatch = do
     createCmd VaultOrchestrator with
       issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
 
+  dummyAuthCid <- submit issuer do
+    createCmd DepositAuthorization with
+      issuer; mpc; owner = depositor; remainingUses = 0
+
   pendingCid <- submit issuer do
     createCmd PendingEvmDeposit with
       issuer; requester = depositor; mpc
       requestId = "aa"; path = "test"; evmParams = sampleEvmParams
-      authContractId = ""; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
+      authCidText = ""; authCid = dummyAuthCid; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
 
   ecdsaCid <- submit issuer do
     createCmd EcdsaSignature with

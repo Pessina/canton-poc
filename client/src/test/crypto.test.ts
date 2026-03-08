@@ -86,7 +86,7 @@ describe("computeRequestId", () => {
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it("changes with different authContractId", () => {
+  it("changes with different authCidText", () => {
     const a = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH, "ECDSA", "ethereum", "auth1");
     const b = computeRequestId(SENDER, sampleEvmParams, CAIP2_ID, KEY_VERSION, PATH, "ECDSA", "ethereum", "auth2");
     expect(a).not.toBe(b);

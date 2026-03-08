@@ -12,7 +12,7 @@ import {
 import { createLedgerStream } from "../infra/ledger-stream.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import type { EvmTransactionParams } from "../mpc/crypto.js";
-import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
+import { deriveDepositAddress } from "../mpc/address-derivation.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
@@ -61,9 +61,8 @@ async function main() {
   await createUser(USER_ID, issuer, [depositor]);
 
   const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
-  const caip2Id = chainIdHexToCaip2("0000000000000000000000000000000000000000000000000000000000aa36a7");
   const requesterPath = depositor;
-  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root", caip2Id);
+  const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, packageId, "root");
   const sampleEvmParams = buildSampleEvmParams(vaultAddress);
 
   const orchResult = await createContract(USER_ID, [issuer], VAULT_ORCHESTRATOR, {

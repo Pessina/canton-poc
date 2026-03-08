@@ -28,7 +28,8 @@ export async function handlePendingEvmDeposit(params: {
   const contractRequestId = args.requestId as string;
   const evmParams = args.evmParams as CantonEvmParams;
   const issuer = args.issuer as string;
-  const authContractId = args.authContractId as string;
+  // Read the verified authCid (injected by VaultOrchestrator) — not the user-supplied authCidText
+  const authCid = args.authCid as string;
   const keyVersion = args.keyVersion as number;
   const algo = args.algo as string;
   const dest = args.dest as string;
@@ -41,7 +42,7 @@ export async function handlePendingEvmDeposit(params: {
   const predecessorId = `${packageId}${issuer}`;
   const keyDerivationPath = `${requester}${requestPath}`;
 
-  // Independently derive requestId — never trust on-chain data blindly
+  // Independently derive requestId from the verified authCid (not user-supplied authCidText)
   const caip2Id = chainIdHexToCaip2(evmParams.chainId);
   const computedRequestId = computeRequestId(
     requester,
@@ -51,7 +52,7 @@ export async function handlePendingEvmDeposit(params: {
     requestPath,
     algo,
     dest,
-    authContractId,
+    authCid,
   );
   if (computedRequestId.slice(2) !== contractRequestId) {
     throw new Error(
@@ -66,12 +67,7 @@ export async function handlePendingEvmDeposit(params: {
   const serializedUnsigned = serializeUnsignedTx(evmParams);
   const txHash = keccak256(serializedUnsigned);
 
-  const childPrivateKey = deriveChildPrivateKey(
-    rootPrivateKey,
-    predecessorId,
-    keyDerivationPath,
-    caip2Id,
-  );
+  const childPrivateKey = deriveChildPrivateKey(rootPrivateKey, predecessorId, keyDerivationPath);
   const { r, s, v } = signEvmTxHash(childPrivateKey, txHash);
 
   console.log(`[MPC] Signing EVM tx, exercising SignEvmTx`);
@@ -98,6 +94,11 @@ export async function handlePendingEvmDeposit(params: {
     transport: http(rpcUrl),
   });
 
+  // ERC-20 Transfer(address,address,uint256) event signature
+  const ERC20_TRANSFER_TOPIC = keccak256(
+    new TextEncoder().encode("Transfer(address,address,uint256)"),
+  );
+
   let mpcOutput: string;
   try {
     const receipt = await client.waitForTransactionReceipt({
@@ -105,8 +106,22 @@ export async function handlePendingEvmDeposit(params: {
       timeout: 120_000,
       pollingInterval: 5_000,
     });
-    mpcOutput = receipt.status === "success" ? "01" : "00";
-    console.log(`[MPC] Receipt received, status=${receipt.status}`);
+
+    const hasTransferEvent = receipt.logs.some(
+      (log) => log.topics[0]?.toLowerCase() === ERC20_TRANSFER_TOPIC.toLowerCase(),
+    );
+
+    if (receipt.status === "success" && hasTransferEvent) {
+      mpcOutput = "01";
+    } else {
+      mpcOutput = "00";
+      console.warn(
+        `[MPC] Tx did not produce a valid transfer: status=${receipt.status}, hasTransferEvent=${hasTransferEvent}`,
+      );
+    }
+    console.log(
+      `[MPC] Receipt received, status=${receipt.status}, hasTransferEvent=${hasTransferEvent}`,
+    );
   } catch (err) {
     console.error(
       `[MPC] Failed to get receipt: ${err instanceof Error ? err.message : String(err)}`,

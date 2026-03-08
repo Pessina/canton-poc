@@ -7,15 +7,17 @@ const { deriveChildPublicKey } = utils.cryptography;
 const EPSILON_DERIVATION_PREFIX = "sig.network v2.0.0 epsilon derivation";
 const CURVE_ORDER = secp256k1.Point.Fn.ORDER;
 
+/** signet.js uses eip155:1 for all EVM key derivation, regardless of network. */
+const KDF_CHAIN_ID = "eip155:1";
+
 export const KEY_VERSION = 1;
 
 function deriveChildPublicKeyFallback(
   rootPubKey: `04${string}`,
   predecessorId: string,
   path: string,
-  caip2Id: string,
 ): `04${string}` {
-  const derivationPath = `${EPSILON_DERIVATION_PREFIX}:${caip2Id}:${predecessorId}:${path}`;
+  const derivationPath = `${EPSILON_DERIVATION_PREFIX}:${KDF_CHAIN_ID}:${predecessorId}:${path}`;
   const epsilon = BigInt(keccak256(toBytes(derivationPath)));
   const scalar = (((epsilon % CURVE_ORDER) + CURVE_ORDER) % CURVE_ORDER);
 
@@ -27,12 +29,12 @@ function deriveChildPublicKeyFallback(
 
 /**
  * Derive an Ethereum deposit address from MPC root key + derivation params.
+ * Uses eip155:1 for KDF (signet.js protocol constant).
  */
 export function deriveDepositAddress(
   rootPubKey: string, // "04..." uncompressed secp256k1 (no 0x)
   predecessorId: string,
   path: string,
-  caip2Id: string,
   keyVersion = KEY_VERSION,
 ): Hex {
   let childPubKey: `04${string}`;
@@ -41,7 +43,7 @@ export function deriveDepositAddress(
       rootPubKey as `04${string}`,
       predecessorId,
       path,
-      caip2Id,
+      KDF_CHAIN_ID,
       keyVersion,
     );
   } catch (err) {
@@ -51,7 +53,6 @@ export function deriveDepositAddress(
       rootPubKey as `04${string}`,
       predecessorId,
       path,
-      caip2Id,
     );
   }
   return publicKeyToAddress(`0x${childPubKey}`);

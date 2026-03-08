@@ -5,21 +5,23 @@ import { computeResponseHash } from "../mpc/crypto.js";
 
 const EPSILON_DERIVATION_PREFIX = "sig.network v2.0.0 epsilon derivation";
 
+/** signet.js uses eip155:1 for all EVM key derivation, regardless of network. */
+const KDF_CHAIN_ID = "eip155:1";
+
 /** secp256k1 curve order (n). */
 const CURVE_ORDER = secp256k1.Point.Fn.ORDER;
 
 /**
  * Derive a child private key for signing EVM transactions.
  * childKey = (rootPrivateKey + epsilon) mod n
- * where epsilon = keccak256("{prefix}:{caip2Id}:{predecessorId}:{path}")
+ * where epsilon = keccak256("{prefix}:eip155:1:{predecessorId}:{path}")
  */
 export function deriveChildPrivateKey(
   rootPrivateKey: Hex,
   predecessorId: string,
   path: string,
-  caip2Id: string,
 ): Hex {
-  const derivationPath = `${EPSILON_DERIVATION_PREFIX}:${caip2Id}:${predecessorId}:${path}`;
+  const derivationPath = `${EPSILON_DERIVATION_PREFIX}:${KDF_CHAIN_ID}:${predecessorId}:${path}`;
   const epsilon = keccak256(toBytes(derivationPath));
 
   const rootKey = BigInt(rootPrivateKey);

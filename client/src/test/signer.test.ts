@@ -13,17 +13,16 @@ const MPC_ROOT_PUBLIC_KEY =
 
 const PREDECESSOR_ID = "Issuer::1220abcdef";
 const PATH = "m/44/60/0/0";
-const CAIP2_ID = "eip155:1";
 
 describe("deriveChildPrivateKey", () => {
   it("produces valid 32-byte hex", () => {
-    const childKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
+    const childKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH);
     expect(childKey).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   it("is deterministic", () => {
-    const a = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
-    const b = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
+    const a = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH);
+    const b = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH);
     expect(a).toBe(b);
   });
 
@@ -32,7 +31,6 @@ describe("deriveChildPrivateKey", () => {
       MPC_ROOT_PRIVATE_KEY,
       PREDECESSOR_ID,
       PATH,
-      CAIP2_ID,
     );
 
     const privKeyBytes = toBytes(childPrivKey);
@@ -44,7 +42,7 @@ describe("deriveChildPrivateKey", () => {
       MPC_ROOT_PUBLIC_KEY as `04${string}`,
       PREDECESSOR_ID,
       PATH,
-      CAIP2_ID,
+      "eip155:1",
       1,
     );
 
@@ -56,7 +54,7 @@ describe("signEvmTxHash", () => {
   const sampleTxHash = keccak256("0xdeadbeef");
 
   it("produces { r, s, v }", () => {
-    const childKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
+    const childKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH);
     const sig = signEvmTxHash(childKey, sampleTxHash);
 
     expect(sig.r).toMatch(/^[0-9a-f]{64}$/);
@@ -65,7 +63,7 @@ describe("signEvmTxHash", () => {
   });
 
   it("recovery bit is correct", () => {
-    const childKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH, CAIP2_ID);
+    const childKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH);
     const sig = signEvmTxHash(childKey, sampleTxHash);
 
     const msgHash = toBytes(sampleTxHash);
