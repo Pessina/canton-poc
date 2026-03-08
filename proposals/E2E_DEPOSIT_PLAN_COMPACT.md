@@ -454,8 +454,7 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
 
 ### Crypto Functions (Crypto.daml)
 
-Uses EIP-712-style domain-separated hashing to eliminate `abi.encodePacked`
-collision vectors.
+Uses EIP-712-style domain-separated hashing to eliminate collision vectors.
 
 ```daml
 -- Domain tags
