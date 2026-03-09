@@ -1,9 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { hashTypedData, keccak256, stringToHex } from "viem";
+import { hashTypedData } from "viem";
 import {
   computeRequestId,
   computeResponseHash,
-  hashEvmParams,
   eip712Types,
   eip712Domain,
   type EvmTransactionParams,
@@ -33,53 +32,15 @@ const PATH = "m/44/60/0/0";
 // Cross-language vectors (must match Daml Test.daml)
 // ---------------------------------------------------------------------------
 const VECTORS = {
-  domainSeparator: "6399709c8eafb86e7ba1529eaf5519bf2667716e3c694e7868b652b7245ca80f",
-  hashEvmParams: "d0764d6b66fc548fadceced13b66ed3b6c3737c020d116fb80d0dce85568613f",
   requestIdKv1: "0x767d52078eb4f558d2ad22df5c3daf3045fbaf96c4a18400357adbfdd25a8972",
   requestIdKv256: "0x82becb6d088e399f2d92095d993890eaa548a9ce6338bd102eaf599b6aaed489",
   requestIdKv0: "0x43d221a4edee57c6a6f0c4606fd14b7fb73300be41e6a1ea09db42f6772699f3",
-  hashEvmParamsEmptyArgs: "6e2af85ef5f8770dc382c8fa9a1cdbb4560c6e18a4d14ec9d266af538f2a37bc",
   requestIdEmptyArgs: "0x0892f934734c6280aa92fdf8d8ff9bf7edb918f748c1833cc6fc15e96c0da1ab",
   responseHash01: "0x5773f12bd1f9c7a760461812f7a3fc96a2f5a0f041258dfa8feb43f7f8b3ebe2",
   responseHashEmpty: "0xaf2ff87730133736cd5ad11131445277ced38a0762eaa9e62320a1ffc49de8da",
 };
 
 const KNOWN_REQUEST_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
-// ---------------------------------------------------------------------------
-// Domain separator
-// ---------------------------------------------------------------------------
-describe("EIP-712 domain separator", () => {
-  it("matches cross-language vector", () => {
-    const domainTypeHash = keccak256(stringToHex("EIP712Domain(string name,string version)"));
-    const computed = keccak256(
-      `0x${domainTypeHash.slice(2)}${keccak256(stringToHex("CantonMpc")).slice(2)}${keccak256(stringToHex("1")).slice(2)}` as `0x${string}`,
-    );
-    expect(computed.slice(2)).toBe(VECTORS.domainSeparator);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// hashEvmParams
-// ---------------------------------------------------------------------------
-describe("hashEvmParams", () => {
-  it("matches cross-language vector", () => {
-    expect(hashEvmParams(sampleEvmParams)).toBe(VECTORS.hashEvmParams);
-  });
-
-  it("is deterministic", () => {
-    expect(hashEvmParams(sampleEvmParams)).toBe(hashEvmParams(sampleEvmParams));
-  });
-
-  it("changes when params change", () => {
-    const original = hashEvmParams(sampleEvmParams);
-    const modified = hashEvmParams({
-      ...sampleEvmParams,
-      nonce: "0000000000000000000000000000000000000000000000000000000000000002",
-    });
-    expect(original).not.toBe(modified);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // computeRequestId
@@ -102,7 +63,6 @@ describe("computeRequestId", () => {
 
   it("matches cross-language vector (empty args)", () => {
     const emptyArgsParams = { ...sampleEvmParams, args: [] as string[] };
-    expect(hashEvmParams(emptyArgsParams)).toBe(VECTORS.hashEvmParamsEmptyArgs);
     const hash = computeRequestId(SENDER, emptyArgsParams, CAIP2_ID, 1, PATH, "ECDSA", "ethereum", "");
     expect(hash).toBe(VECTORS.requestIdEmptyArgs);
   });

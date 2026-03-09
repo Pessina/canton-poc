@@ -1,4 +1,4 @@
-import { keccak256, stringToHex, hashTypedData, type Hex } from "viem";
+import { hashTypedData, type Hex } from "viem";
 
 export interface EvmTransactionParams {
   to: string;
@@ -48,49 +48,6 @@ export const eip712Domain = {
   name: "CantonMpc",
   version: "1",
 } as const;
-
-// ---------------------------------------------------------------------------
-// EIP-712 struct hash for EvmTransactionParams (cross-language testing)
-// ---------------------------------------------------------------------------
-
-const EVM_PARAMS_TYPE_HASH = keccak256(
-  stringToHex(
-    "EvmTransactionParams(address to,string functionSignature,bytes[] args,uint256 value,uint256 nonce,uint256 gasLimit,uint256 maxFeePerGas,uint256 maxPriorityFee,uint256 chainId)",
-  ),
-).slice(2);
-
-function hashText(t: string): string {
-  return keccak256(stringToHex(t)).slice(2);
-}
-
-function hashBytesList(xs: string[]): string {
-  if (xs.length === 0) return keccak256("0x").slice(2);
-  const inner = xs.map((x) => keccak256(`0x${x}`).slice(2)).join("");
-  return keccak256(`0x${inner}`).slice(2);
-}
-
-function padHex(hex: string, bytes: number): string {
-  return hex.padStart(bytes * 2, "0").slice(-(bytes * 2));
-}
-
-/**
- * EIP-712 struct hash for EvmTransactionParams.
- * Mirrors Daml's hashEvmParams in Crypto.daml.
- */
-export function hashEvmParams(p: EvmTransactionParams): string {
-  const preimage =
-    EVM_PARAMS_TYPE_HASH +
-    padHex(p.to, 32) +
-    hashText(p.functionSignature) +
-    hashBytesList(p.args) +
-    padHex(p.value, 32) +
-    padHex(p.nonce, 32) +
-    padHex(p.gasLimit, 32) +
-    padHex(p.maxFeePerGas, 32) +
-    padHex(p.maxPriorityFee, 32) +
-    padHex(p.chainId, 32);
-  return keccak256(`0x${preimage}`).slice(2);
-}
 
 // ---------------------------------------------------------------------------
 // EIP-712 typed data hashing (viem)
