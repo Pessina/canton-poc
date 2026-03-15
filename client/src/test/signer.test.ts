@@ -16,11 +16,7 @@ const PATH = "m/44/60/0/0";
 
 describe("deriveChildPrivateKey", () => {
   it("matches deriveChildPublicKey", () => {
-    const childPrivKey = deriveChildPrivateKey(
-      MPC_ROOT_PRIVATE_KEY,
-      PREDECESSOR_ID,
-      PATH,
-    );
+    const childPrivKey = deriveChildPrivateKey(MPC_ROOT_PRIVATE_KEY, PREDECESSOR_ID, PATH);
 
     const privKeyBytes = toBytes(childPrivKey);
     const childPubFromPriv = Buffer.from(secp256k1.getPublicKey(privKeyBytes, false)).toString(
