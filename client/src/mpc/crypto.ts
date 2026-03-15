@@ -129,11 +129,29 @@ export function toSpkiPublicKey(uncompressedPubKey: string): string {
 
   // secp256k1 SPKI header: SEQUENCE { SEQUENCE { OID ecPublicKey, OID secp256k1 }, BIT STRING }
   const spkiHeader = new Uint8Array([
-    0x30, 0x56, // SEQUENCE (86 bytes)
-    0x30, 0x10, // SEQUENCE (16 bytes)
-    0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, // OID ecPublicKey
-    0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a, // OID secp256k1
-    0x03, 0x42, 0x00, // BIT STRING (66 bytes, 0 unused bits)
+    0x30,
+    0x56, // SEQUENCE (86 bytes)
+    0x30,
+    0x10, // SEQUENCE (16 bytes)
+    0x06,
+    0x07,
+    0x2a,
+    0x86,
+    0x48,
+    0xce,
+    0x3d,
+    0x02,
+    0x01, // OID ecPublicKey
+    0x06,
+    0x05,
+    0x2b,
+    0x81,
+    0x04,
+    0x00,
+    0x0a, // OID secp256k1
+    0x03,
+    0x42,
+    0x00, // BIT STRING (66 bytes, 0 unused bits)
     0x04, // uncompressed point marker
   ]);
 

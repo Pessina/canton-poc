@@ -113,7 +113,10 @@ export async function createUser(
   additionalParties: string[] = [],
 ): Promise<void> {
   const allParties = [primaryParty, ...additionalParties];
-  const rights = allParties.flatMap((party): UserRight[] => [canActAsRight(party), canReadAsRight(party)]);
+  const rights = allParties.flatMap((party): UserRight[] => [
+    canActAsRight(party),
+    canReadAsRight(party),
+  ]);
   return createUserWithRights(userId, primaryParty, rights);
 }
 
@@ -231,10 +234,7 @@ export async function uploadDar(darPath: string): Promise<void> {
     if (text.includes("NOT_VALID_UPGRADE_PACKAGE")) return;
 
     // Sandbox JSON API can come up before a synchronizer is fully connected.
-    if (
-      text.includes("PACKAGE_SERVICE_CANNOT_AUTODETECT_SYNCHRONIZER") &&
-      attempt < maxAttempts
-    ) {
+    if (text.includes("PACKAGE_SERVICE_CANNOT_AUTODETECT_SYNCHRONIZER") && attempt < maxAttempts) {
       await new Promise((r) => setTimeout(r, 1000));
       continue;
     }
@@ -341,9 +341,13 @@ export async function exerciseChoice(
   readAs?: string[],
   disclosedContracts?: DisclosedContract[],
 ): Promise<TransactionResponse> {
-  return submitAndWait(userId, actAs, [
-    { ExerciseCommand: { templateId, contractId, choice, choiceArgument } },
-  ], readAs, disclosedContracts);
+  return submitAndWait(
+    userId,
+    actAs,
+    [{ ExerciseCommand: { templateId, contractId, choice, choiceArgument } }],
+    readAs,
+    disclosedContracts,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -532,9 +536,7 @@ export async function getDisclosedContract(
   }
   const { createdEvent, synchronizerId } = entry;
   if (!createdEvent.createdEventBlob) {
-    throw new Error(
-      `getDisclosedContract: contract ${contractId} is missing createdEventBlob`,
-    );
+    throw new Error(`getDisclosedContract: contract ${contractId} is missing createdEventBlob`);
   }
   return {
     templateId: createdEvent.templateId,

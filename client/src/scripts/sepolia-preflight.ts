@@ -55,7 +55,11 @@ async function main() {
   const predecessorId = `${packageId}${issuer}`;
   const requestPath = requester;
   const depositDerivationPath = `${requester},${requestPath}`;
-  const depositAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, predecessorId, depositDerivationPath);
+  const depositAddress = deriveDepositAddress(
+    MPC_ROOT_PUBLIC_KEY,
+    predecessorId,
+    depositDerivationPath,
+  );
   const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, predecessorId, "root");
 
   console.log(`Package ID used for derivation: ${packageId}`);

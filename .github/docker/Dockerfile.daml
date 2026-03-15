@@ -1,0 +1,7 @@
+FROM eclipse-temurin:17-jdk-noble
+
+RUN curl -sSL https://get.digitalasset.com/install/install.sh | sh
+
+ENV PATH="/root/.dpm/bin:$PATH"
+
+WORKDIR /workspace

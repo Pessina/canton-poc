@@ -169,23 +169,15 @@ describe("ledger visibility + permission model", () => {
     ).rejects.toThrow();
 
     // Issuer approves (signatory, no disclosure needed)
-    await exerciseChoice(
-      ISSUER_USER,
-      [issuer],
-      VAULT_ORCHESTRATOR,
-      orchCid,
-      "ApproveDepositAuth",
-      { proposalCid: proposal.contractId, remainingUses: 1 },
-    );
+    await exerciseChoice(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, orchCid, "ApproveDepositAuth", {
+      proposalCid: proposal.contractId,
+      remainingUses: 1,
+    });
   });
 
   it("full lifecycle: controller permissions and observer visibility", async () => {
     // -- VaultOrchestrator visibility: signatory=issuer, observer=mpc
-    await assertVisibility(
-      VAULT_ORCHESTRATOR, orchCid,
-      [issuer, mpc],
-      [requester],
-    );
+    await assertVisibility(VAULT_ORCHESTRATOR, orchCid, [issuer, mpc], [requester]);
 
     // -- Step 1: RequestDepositAuth (controller=requester)
     const proposalResult = await exerciseChoice(
@@ -198,14 +190,13 @@ describe("ledger visibility + permission model", () => {
       undefined,
       [orchDisclosure],
     );
-    const proposalCid = findCreated(proposalResult.transaction.events, "DepositAuthProposal").contractId;
+    const proposalCid = findCreated(
+      proposalResult.transaction.events,
+      "DepositAuthProposal",
+    ).contractId;
 
     // DepositAuthProposal: signatory=issuer, observer=owner(requester)
-    await assertVisibility(
-      DEPOSIT_AUTH_PROPOSAL, proposalCid,
-      [issuer, requester],
-      [mpc],
-    );
+    await assertVisibility(DEPOSIT_AUTH_PROPOSAL, proposalCid, [issuer, requester], [mpc]);
 
     // -- Step 2: ApproveDepositAuth (controller=issuer)
     const approveResult = await exerciseChoice(
@@ -216,14 +207,13 @@ describe("ledger visibility + permission model", () => {
       "ApproveDepositAuth",
       { proposalCid, remainingUses: 2 },
     );
-    const authCid = findCreated(approveResult.transaction.events, "DepositAuthorization").contractId;
+    const authCid = findCreated(
+      approveResult.transaction.events,
+      "DepositAuthorization",
+    ).contractId;
 
     // DepositAuthorization: signatory=issuer, observer=mpc,owner
-    await assertVisibility(
-      DEPOSIT_AUTHORIZATION, authCid,
-      [issuer, requester, mpc],
-      [],
-    );
+    await assertVisibility(DEPOSIT_AUTHORIZATION, authCid, [issuer, requester, mpc], []);
 
     // -- Step 4: RequestEvmDeposit (controller=requester)
     const evmParams = buildSampleEvmParams(vaultAddress);
@@ -252,11 +242,7 @@ describe("ledger visibility + permission model", () => {
     const requestId = pendingArgs.requestId as string;
 
     // PendingEvmDeposit: signatory=issuer, observer=mpc,requester
-    await assertVisibility(
-      PENDING_EVM_DEPOSIT, pendingCid,
-      [issuer, requester, mpc],
-      [],
-    );
+    await assertVisibility(PENDING_EVM_DEPOSIT, pendingCid, [issuer, requester, mpc], []);
 
     // -- Step 7: SignEvmTx (controller=issuer)
     // Requester cannot exercise issuer-controlled choices
@@ -284,11 +270,7 @@ describe("ledger visibility + permission model", () => {
     const ecdsaCid = findCreated(signResult.transaction.events, "EcdsaSignature").contractId;
 
     // EcdsaSignature: signatory=issuer, observer=requester
-    await assertVisibility(
-      ECDSA_SIGNATURE, ecdsaCid,
-      [issuer, requester],
-      [mpc],
-    );
+    await assertVisibility(ECDSA_SIGNATURE, ecdsaCid, [issuer, requester], [mpc]);
 
     // -- Step 10: ProvideEvmOutcomeSig (controller=issuer)
     await expect(
@@ -314,26 +296,23 @@ describe("ledger visibility + permission model", () => {
       "ProvideEvmOutcomeSig",
       { requester, requestId, signature: mpcSignature, mpcOutput },
     );
-    const outcomeCid = findCreated(outcomeResult.transaction.events, "EvmTxOutcomeSignature").contractId;
+    const outcomeCid = findCreated(
+      outcomeResult.transaction.events,
+      "EvmTxOutcomeSignature",
+    ).contractId;
 
     // EvmTxOutcomeSignature: signatory=issuer, observer=requester
-    await assertVisibility(
-      EVM_TX_OUTCOME_SIG, outcomeCid,
-      [issuer, requester],
-      [mpc],
-    );
+    await assertVisibility(EVM_TX_OUTCOME_SIG, outcomeCid, [issuer, requester], [mpc]);
 
     // -- Step 11: ClaimEvmDeposit (controller=requester)
     // Issuer cannot claim (controller is requester, not issuer)
     await expect(
-      exerciseChoice(
-        ISSUER_USER,
-        [issuer],
-        VAULT_ORCHESTRATOR,
-        orchCid,
-        "ClaimEvmDeposit",
-        { requester, pendingCid, outcomeCid, ecdsaCid },
-      ),
+      exerciseChoice(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, orchCid, "ClaimEvmDeposit", {
+        requester,
+        pendingCid,
+        outcomeCid,
+        ecdsaCid,
+      }),
     ).rejects.toThrow();
 
     // Requester claims via disclosure
@@ -353,11 +332,7 @@ describe("ledger visibility + permission model", () => {
     expect(holdingArgs.issuer).toBe(issuer);
 
     // Erc20Holding: signatory=issuer, observer=owner(requester)
-    await assertVisibility(
-      ERC20_HOLDING, holding.contractId,
-      [issuer, requester],
-      [mpc],
-    );
+    await assertVisibility(ERC20_HOLDING, holding.contractId, [issuer, requester], [mpc]);
 
     // Evidence contracts must be archived after claim
     const remainingPending = await getActiveContracts([issuer], PENDING_EVM_DEPOSIT);

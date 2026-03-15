@@ -5,10 +5,7 @@ export function getCreatedEvent(event: Event): CreatedEvent | undefined {
   return undefined;
 }
 
-export function findCreated(
-  events: Event[] | undefined,
-  templateFragment: string,
-): CreatedEvent {
+export function findCreated(events: Event[] | undefined, templateFragment: string): CreatedEvent {
   const event = events?.find((e) => getCreatedEvent(e)?.templateId.includes(templateFragment));
   const created = event ? getCreatedEvent(event) : undefined;
   if (!created) throw new Error(`CreatedEvent matching "${templateFragment}" not found`);
