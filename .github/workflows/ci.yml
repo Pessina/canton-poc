@@ -18,12 +18,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Daml codegen
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Daml SDK
+        working-directory: .
+        run: curl -sSL https://get.digitalasset.com/install/install.sh | sh
+
+      - name: Build DAR & generate Daml codegen
         working-directory: .
         run: |
-          docker build -t daml-builder -f .github/docker/Dockerfile.daml .
-          docker run --rm -v "${{ github.workspace }}:/workspace" daml-builder \
-            sh -c "dpm build && dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js"
+          export PATH="$HOME/.dpm/bin:$PATH"
+          dpm build
+          dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js
 
       - uses: pnpm/action-setup@v4
         with:
@@ -34,10 +43,6 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
-
-      - name: Fix generated directory permissions
-        working-directory: .
-        run: sudo chown -R "$(id -u):$(id -g)" client/generated/
 
       - name: Generate OpenAPI types
         run: pnpx openapi-typescript openapi.yaml -o generated/api/ledger-api.ts
@@ -50,17 +55,26 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     needs: check
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Daml codegen
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Daml SDK
+        working-directory: .
+        run: curl -sSL https://get.digitalasset.com/install/install.sh | sh
+
+      - name: Build DAR & generate Daml codegen
         working-directory: .
         run: |
-          docker build -t daml-builder -f .github/docker/Dockerfile.daml .
-          docker run --rm -v "${{ github.workspace }}:/workspace" daml-builder \
-            sh -c "dpm build && dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js"
+          export PATH="$HOME/.dpm/bin:$PATH"
+          dpm build
+          dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js
 
       - uses: pnpm/action-setup@v4
         with:
@@ -72,12 +86,27 @@ jobs:
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
 
-      - name: Fix generated directory permissions
-        working-directory: .
-        run: sudo chown -R "$(id -u):$(id -g)" client/generated/
-
       - name: Generate OpenAPI types
         run: pnpx openapi-typescript openapi.yaml -o generated/api/ledger-api.ts
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Start Canton sandbox
+        working-directory: .
+        run: |
+          export PATH="$HOME/.dpm/bin:$PATH"
+          dpm sandbox --json-api-port 7575 --dar .daml/dist/canton-mpc-poc-0.0.1.dar &
+
+      - name: Wait for Canton JSON API
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:7575/docs/openapi > /dev/null 2>&1; then
+              echo "Canton sandbox is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Canton sandbox failed to start within 120s"
+          exit 1
+
       - run: pnpm test
