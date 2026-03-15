@@ -35,6 +35,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
 
+      - name: Fix generated directory permissions
+        working-directory: .
+        run: sudo chown -R "$(id -u):$(id -g)" client/generated/
+
       - name: Generate OpenAPI types
         run: pnpx openapi-typescript openapi.yaml -o generated/api/ledger-api.ts
 
@@ -67,6 +71,10 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
+
+      - name: Fix generated directory permissions
+        working-directory: .
+        run: sudo chown -R "$(id -u):$(id -g)" client/generated/
 
       - name: Generate OpenAPI types
         run: pnpx openapi-typescript openapi.yaml -o generated/api/ledger-api.ts
