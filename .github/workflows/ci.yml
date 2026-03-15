@@ -18,6 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -27,6 +32,21 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
+
+      - name: Install Daml SDK
+        working-directory: .
+        run: |
+          curl -sSL https://get.digitalasset.com/install/install.sh | sh
+          echo "$HOME/.dpm/bin" >> $GITHUB_PATH
+
+      - name: Build DAR and generate codegen
+        working-directory: .
+        run: |
+          dpm build
+          dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js
+
+      - name: Generate OpenAPI types
+        run: pnpx openapi-typescript openapi.yaml -o generated/api/ledger-api.ts
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
@@ -41,6 +61,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -50,6 +75,21 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: client/pnpm-lock.yaml
+
+      - name: Install Daml SDK
+        working-directory: .
+        run: |
+          curl -sSL https://get.digitalasset.com/install/install.sh | sh
+          echo "$HOME/.dpm/bin" >> $GITHUB_PATH
+
+      - name: Build DAR and generate codegen
+        working-directory: .
+        run: |
+          dpm build
+          dpm codegen-js .daml/dist/canton-mpc-poc-0.0.1.dar -o client/generated/model -s daml.js
+
+      - name: Generate OpenAPI types
+        run: pnpx openapi-typescript openapi.yaml -o generated/api/ledger-api.ts
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
