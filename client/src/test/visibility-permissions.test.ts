@@ -25,6 +25,7 @@ import {
 } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import { deriveDepositAddress } from "../mpc/address-derivation.js";
 import { signMpcResponse } from "../mpc-service/signer.js";
+import { loadEnv } from "../config/env.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
@@ -110,7 +111,7 @@ describe("ledger visibility + permission model", () => {
     await createUser(ISSUER_USER, issuer);
     await createUser(REQUESTER_USER, requester);
 
-    const VAULT_ID = "test-vault";
+    const { VAULT_ID } = loadEnv();
     vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, `${VAULT_ID}${issuer}`, "root");
 
     const orchResult = await createContract(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, {

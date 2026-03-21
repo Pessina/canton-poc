@@ -65,7 +65,12 @@ async function pollForContract(
   throw new Error(`Timed out waiting for ${label} (${POLL_TIMEOUT / 1000}s)`);
 }
 
-const env = process.env.SEPOLIA_RPC_URL ? loadEnv() : null;
+let env: ReturnType<typeof loadEnv> | null = null;
+try {
+  env = loadEnv();
+} catch {
+  // .env missing or incomplete — skip E2E tests
+}
 const describeIf = env ? describe : describe.skip;
 
 describeIf("sepolia e2e deposit lifecycle", () => {
@@ -75,7 +80,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
   let mpc: string;
   let orchCid: string;
   let orchDisclosure: Awaited<ReturnType<typeof getDisclosedContract>>;
-  const VAULT_ID = "canton-mpc-poc";
+  const VAULT_ID = env!.VAULT_ID;
   let vaultAddressPadded: string;
 
   const USER_ID = "sepolia-e2e";
