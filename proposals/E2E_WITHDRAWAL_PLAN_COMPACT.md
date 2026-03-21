@@ -35,10 +35,10 @@ failure, the user's `Erc20Holding` is restored.
 ```
  User                           Canton (VaultOrchestrator)     MPC Service                    Sepolia
  |                              |                              |                              |
- | 1. RequestEvmWithdrawal     |                              |                              |
- |    (balanceCid, evmParams,  |                              |                              |
- |     recipientAddress,       |                              |                              |
- |     balanceCidText)         |                              |                              |
+ | 1. RequestEvmWithdrawal      |                              |                              |
+ |    (balanceCid, evmParams,   |                              |                              |
+ |     recipientAddress,        |                              |                              |
+ |     balanceCidText)          |                              |                              |
  |----------------------------->|                              |                              |
  |                              | validates Erc20Holding       |                              |
  |                              | archives it (optimistic      |                              |
@@ -46,9 +46,9 @@ failure, the user's `Erc20Holding` is restored.
  |                              |                              |                              |
  |                              | 2. creates PendingEvmWdl     |                              |
  |                              |    (path="root", evmParams,  |                              |
- |                              |     requester,               |                              |
- |                              |     balanceCidText,          |                              |
- |                              |     balanceCid)              |                              |
+ |                              |    requester,                |                              |
+ |                              |    balanceCidText,           |                              |
+ |                              |    balanceCid)               |                              |
  |                              |                              |                              |
  |                              |    observes PendingEvmWdl    |                              |
  |                              |----------------------------->|                              |
@@ -63,19 +63,19 @@ failure, the user's `Erc20Holding` is restored.
  |                              |<------ EcdsaSignature -------|                              |
  |                              |        (r, s, v)             |                              |
  |                              |                              |                              |
- | 5. observes EcdsaSignature  |                              |                              |
+ | 5. observes EcdsaSignature   |                              |                              |
  |<-----------------------------|                              |                              |
- |    reconstructSignedTx      |                              |                              |
- |    eth_sendRawTransaction   |                              |                              |
- |----------------------------------------------------------------------- withdrawal tx ---->|
+ |    reconstructSignedTx       |                              |                              |
+ |    eth_sendRawTransaction    |                              |                              |
+ |----------------------------------------------------------------------- withdrawal tx ----->|
  |                              |                              |    (vault addr -> recipient) |
- |<---------------------------------------------------------------------- receipt -----------|
+ |<---------------------------------------------------------------------- receipt ------------|
  |                              |                              |                              |
  |                              |                              | 6. polls Sepolia             |
  |                              |                              |    (knows expected           |
  |                              |                              |     withdrawal tx hash)      |
  |                              |                              |                              |
- |                              |                              |--- getTransactionReceipt -->|
+ |                              |                              |--- getTransactionReceipt --->|
  |                              |                              |<-----------------------------|
  |                              |                              |    verify receipt.status     |
  |                              |                              |                              |
@@ -83,19 +83,19 @@ failure, the user's `Erc20Holding` is restored.
  |                              |<--- EvmTxOutcomeSignature ---|                              |
  |                              |    (signature, mpcOutput)    |                              |
  |                              |                              |                              |
- | 8. observes EvmTxOutcomeSig |                              |                              |
+ | 8. observes EvmTxOutcomeSig  |                              |                              |
  |<-----------------------------|                              |                              |
- |    CompleteEvmWithdrawal    |                              |                              |
- |-- pending, outcome, ecdsa ->|                              |                              |
+ |    CompleteEvmWithdrawal     |                              |                              |
+ |-- pending, outcome, ecdsa -->|                              |                              |
  |                              |                              |                              |
- |                              | 9. archive PendingEvmWdl    |                              |
+ |                              | 9. archive PendingEvmWdl     |                              |
  |                              |     archive EvmTxOutcomeSig  |                              |
  |                              |     archive EcdsaSignature   |                              |
  |                              |                              |                              |
  |                              |     if success:              |                              |
  |                              |       withdrawal complete    |                              |
  |                              |     if failure:              |                              |
- |<-- refund Erc20Holding -----|       creates refund holding |                              |
+ |<-- refund Erc20Holding ------|       creates refund holding |                              |
  |                              |                              |                              |
 ```
 
@@ -119,7 +119,7 @@ template VaultOrchestrator
     signatory issuer
     observer mpc
 
-    -- Deposit choices (existing)
+    -- Deposit choices (existing, see E2E_DEPOSIT_PLAN_COMPACT.md)
     nonconsuming choice RequestDepositAuth    : ContractId DepositAuthProposal
     nonconsuming choice ApproveDepositAuth    : ContractId DepositAuthorization
     nonconsuming choice RequestEvmDeposit     : ContractId PendingEvmDeposit
@@ -160,18 +160,9 @@ template PendingEvmWithdrawal
     observer mpc, requester
 ```
 
-### Reused Contracts
-
-The following contracts are unchanged from the deposit flow:
-
-- **`EvmTransactionParams`** (Types.daml) — generic EIP-1559 transaction
-  encoding; the withdrawal `transfer` call uses the same structure
-- **`EcdsaSignature`** (Erc20Vault.daml) — MPC's EVM transaction signature;
-  linked to the withdrawal by `requestId`
-- **`EvmTxOutcomeSignature`** (Erc20Vault.daml) — MPC's attestation of the
-  EVM outcome; verified against `mpcPublicKey` in `CompleteEvmWithdrawal`
-- **`Erc20Holding`** (Erc20Vault.daml) — consumed as input to
-  `RequestEvmWithdrawal`, created as refund output on failure
+All other contracts (`EvmTransactionParams`, `EcdsaSignature`,
+`EvmTxOutcomeSignature`, `Erc20Holding`) are unchanged from the deposit flow —
+see `E2E_DEPOSIT_PLAN_COMPACT.md`.
 
 ### Choices on `VaultOrchestrator`
 
@@ -227,38 +218,28 @@ nonconsuming choice RequestEvmWithdrawal : ContractId PendingEvmWithdrawal
       vaultId; balanceCidText; balanceCid; keyVersion; algo; dest
 ```
 
-`PendingEvmWithdrawal` carries two balance references:
+`PendingEvmWithdrawal` carries two balance references — same dual-reference
+pattern as deposit's `authCidText`/`authCid` (see `E2E_DEPOSIT_PLAN_COMPACT.md`):
 
-- **`balanceCidText : Text`** — user-supplied string form of the
-  `Erc20Holding` contract ID. Input to `computeRequestId`; globally
-  unique (consumed exactly once), guaranteeing `requestId` uniqueness.
+- **`balanceCidText : Text`** — input to `computeRequestId`; globally unique
+  (consumed exactly once), guaranteeing `requestId` uniqueness.
 
-- **`balanceCid : ContractId Erc20Holding`** — injected by
-  `VaultOrchestrator` after fetch + validation. Non-spoofable; MPC reads it
-  directly from the contract payload.
+- **`balanceCid : ContractId Erc20Holding`** — injected by `VaultOrchestrator`
+  after fetch + validation. Non-spoofable; MPC reads it directly from the
+  contract payload.
 
-**Key derivation (predecessorId + path):** Same `predecessorId = vaultId + issuer`
-as deposit. The MPC reads both `vaultId` and `issuer` directly from the
-`PendingEvmWithdrawal` payload — no extraction from `templateId` needed.
-The `vaultId` is set once on `VaultOrchestrator` at deployment and passed
-through to each pending contract.
+**Key derivation (predecessorId + path):** same KDF as deposit —
+`predecessorId = vaultId + issuer`. The difference is path: `"root"` derives
+the vault's shared key that controls the centralized vault address, whereas
+deposit uses `sender + "," + userPath` for per-user deposit addresses.
 
-- **Vault address**: path = `"root"` — the vault's derived private key signs
-  all withdrawals (shared across users)
-- Contrast with deposit: path = `sender + "," + user-supplied path` (per-user
-  deposit address)
-
-**`SignEvmTx`** — reused from deposit (unchanged). MPC posts its EVM
-transaction signature.
-
-**`ProvideEvmOutcomeSig`** — reused from deposit (unchanged). MPC posts the
-ETH receipt verification proof.
+**`SignEvmTx`** and **`ProvideEvmOutcomeSig`** — reused from deposit
+(unchanged, see `E2E_DEPOSIT_PLAN_COMPACT.md`).
 
 **`CompleteEvmWithdrawal`** — user triggers completion after observing the
-outcome signature. Archives all evidence contracts (`PendingEvmWithdrawal`,
-`EvmTxOutcomeSignature`, `EcdsaSignature`). On success (`mpcOutput == "01"`),
-the withdrawal is final — tokens are on Sepolia. On failure, a refund
-`Erc20Holding` is created to restore the user's balance.
+outcome signature. Archives all evidence contracts. On success
+(`mpcOutput == "01"`), the withdrawal is final — tokens are on Sepolia. On
+failure, a refund `Erc20Holding` is created to restore the user's balance.
 
 Unlike `ClaimEvmDeposit` (which rejects on failure), `CompleteEvmWithdrawal`
 must handle both outcomes because the holding was already archived in
@@ -310,22 +291,7 @@ nonconsuming choice CompleteEvmWithdrawal : Optional (ContractId Erc20Holding)
 
 ### Crypto Functions (Crypto.daml)
 
-No new crypto functions are required. The withdrawal reuses the existing
-EIP-712 typed data infrastructure:
+No new functions. `computeRequestId` and `computeResponseHash` are reused
+as-is — the nonce slot (`authCidText` for deposit) receives `balanceCidText`
+for withdrawal.
 
-- **`computeRequestId`** — same function, same signature. The last parameter
-  (`authCidText` in deposit) receives `balanceCidText` for withdrawal — the
-  function is nonce-agnostic, it just hashes text.
-
-- **`computeResponseHash`** — identical usage for both deposit and withdrawal.
-
-```daml
--- Withdrawal calls the same functions as deposit:
-let requestId = computeRequestId sender evmParams caip2Id keyVersion fullPath algo dest balanceCidText
---                                                                                       ^^^^^^^^^^^^^^
---                                                                         nonce slot: authCidText for deposit,
---                                                                                     balanceCidText for withdrawal
-
-let responseHash = computeResponseHash pending.requestId outcome.mpcOutput
--- identical for deposit and withdrawal
-```
