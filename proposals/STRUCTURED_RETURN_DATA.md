@@ -174,6 +174,91 @@ export function computeResponseHash(
 This changes the `ProvideEvmOutcomeSig` choice signature and `EvmTxOutcomeSignature` template
 fields — incompatible DAR upgrade per Canton rules. Requires sandbox restart.
 
+## Why ABI Encoding (Format Comparison)
+
+We evaluated every common serialization format against Daml's actual capabilities. Daml has
+no bitwise operators (no AND, OR, XOR, shift) and no built-in parsers. Everything is hex text.
+The key primitives available in `DA.Crypto.Text` (Canton 3.x) are:
+
+- `fromHex :: BytesHex -> Optional Int` — hex to integer, **big-endian native**
+- `sliceHexBytes :: BytesHex -> Int -> Int -> Either Text BytesHex` — byte-level slicing
+- `toHex :: Int -> BytesHex` — integer to hex
+- `byteCount :: BytesHex -> Int` — length in bytes
+
+Plus `DA.Text.splitOn`, `take`, `drop`, `reverse`, `explode`, `implode` for text manipulation.
+
+### Decoder code comparison: `(uint256, address, bool)` returning `(1000, 0xabc..., true)`
+
+**ABI encoding** — big-endian, 32-byte slots:
+```daml
+let amount  = fromSome (fromHex (sliceHexBytes returnData 0 32))
+let addr    = sliceHexBytes returnData 32 32
+let success = fromSome (fromHex (sliceHexBytes returnData 64 32)) == 1
+```
+Three lines. Zero custom helpers. `fromHex` works directly because ABI is big-endian — same
+as Daml's hex representation.
+
+**Borsh** — little-endian, packed:
+```daml
+let amountLE = sliceHexBytes returnData 0 32
+let amount = fromSome (fromHex (reverseByteOrder amountLE))  -- custom helper
+let addrLE = sliceHexBytes returnData 32 20
+let addr = reverseByteOrder addrLE                            -- custom helper
+let success = sliceHexBytes returnData 52 1 == "01"
+```
+Every multi-byte read needs a `reverseByteOrder` helper (split hex into 2-char pairs, reverse,
+rejoin). That helper also needs a `chunksOf` helper. Two custom functions just to read integers.
+
+**JSON in Text** — `'{"amount":"03e8","addr":"abc..."}'`:
+```daml
+jsonLookup : Text -> Text -> Optional Text
+jsonLookup key json =
+  case DA.Text.splitOn ("\"" <> key <> "\":\"") json of
+    [_, rest] -> Some (DA.Text.takeWhile (/= "\"") rest)
+    _ -> None
+
+let amount = fromSome (fromHex (fromSome (jsonLookup "amount" returnData)))
+```
+Fragile string splitting. Breaks on nested objects, escaped quotes, non-string values. A real
+JSON parser would be 50+ lines of Daml.
+
+**Delimiter-separated hex** — `"03e8,abc...,01"`:
+```daml
+let values = DA.Text.splitOn "," returnData
+let amount = fromSome (fromHex (values !! 0))
+```
+Simple, but not a standard format. Commas aren't valid hex, so the field type must be `Text`
+instead of `BytesHex`, which breaks `keccak256` hashing and changes the EIP-712 semantics.
+
+**RLP**: 5-way branch on first byte, recursive list parsing, ~30 lines of decoder code minimum.
+
+**MessagePack**: Requires bitwise AND to extract values from type bytes. **Not implementable**
+in Daml.
+
+**SSZ**: Same as ABI for static types but little-endian — strictly worse for Daml.
+
+### Summary
+
+| Format | Custom helpers | Lines per 3 fields | Byte order | Works with `fromHex`? | Standard? |
+|--------|---------------|---------------------|------------|----------------------|-----------|
+| **ABI** | **0** | **3** | **Big-endian** | **Yes, native** | **Yes (EVM)** |
+| Borsh | 2 | 3 + helpers | Little-endian | No (must reverse) | Yes (Solana) |
+| JSON | 1 (fragile) | 3 + helper | N/A | Yes (after parsing) | Yes |
+| CSV hex | 0 | 3 | N/A | Yes | No |
+| RLP | 1 (~30 lines) | ~10 | Big-endian | Yes | Yes (Ethereum) |
+| SSZ | 2 | 3 + helpers | Little-endian | No (must reverse) | Yes (Eth2) |
+| MessagePack | impossible | N/A | N/A | N/A | Yes |
+
+**ABI wins** because:
+1. Zero custom helpers for static types — `sliceHexBytes` and `fromHex` already exist
+2. Big-endian matches Daml's `fromHex` natively — no byte swapping
+3. `provider.call()` returns ABI bytes directly — no re-encoding on the MPC service side
+4. The 32-byte padding "wastes" space but is irrelevant on a Canton ledger (stored as `Text`,
+   not metered by gas)
+5. Fixed offsets mean every field is at a known position — trivial to test
+
+---
+
 ## ABI Encoding Reference
 
 ### Type classification
