@@ -7,7 +7,14 @@ import {
 } from "../infra/canton-client.js";
 import { createLedgerStream, type StreamHandle } from "../infra/ledger-stream.js";
 import { PendingEvmDeposit } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
-import { handlePendingEvmDeposit } from "./deposit-handler.js";
+import {
+  signAndEnqueue,
+  checkPendingDeposit,
+  type PendingDeposit,
+  type MpcServiceConfig,
+} from "./deposit-handler.js";
+
+const MONITOR_INTERVAL_MS = 5_000;
 
 /** Extract "Module:Template" suffix, ignoring package hash vs name prefix. */
 function templateSuffix(templateId: string): string {
@@ -29,43 +36,90 @@ export class MpcServer {
   private stream: StreamHandle | null = null;
   private readyPromise: Promise<void>;
   private resolveReady!: () => void;
-  private processedContractIds = new Set<string>();
+  private pendingDeposits = new Map<string, PendingDeposit>();
+  private monitorInterval: ReturnType<typeof setInterval> | null = null;
+  private pollCounter = 0;
+
+  private serviceConfig: MpcServiceConfig;
 
   constructor(private config: MpcServerConfig) {
     this.readyPromise = new Promise((resolve) => {
       this.resolveReady = resolve;
     });
+    this.serviceConfig = {
+      orchCid: config.orchCid,
+      userId: config.userId,
+      actAs: config.parties,
+      rootPrivateKey: config.rootPrivateKey,
+      rpcUrl: config.rpcUrl,
+    };
   }
 
   private dispatchDeposit(event: CreatedEvent): void {
-    if (this.processedContractIds.has(event.contractId)) return;
-    this.processedContractIds.add(event.contractId);
-
+    if (this.pendingDeposits.has(event.contractId)) return;
     console.log(`[MPC] PendingEvmDeposit detected, contractId=${event.contractId}`);
-    handlePendingEvmDeposit({
-      orchCid: this.config.orchCid,
-      userId: this.config.userId,
-      actAs: this.config.parties,
-      rootPrivateKey: this.config.rootPrivateKey,
-      rpcUrl: this.config.rpcUrl,
-      event,
-    }).catch((err) => {
-      console.error(
-        `[MPC] Failed to handle deposit: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    });
+    void this.processDeposit(event);
   }
 
-  private catchUp(): void {
+  private async processDeposit(event: CreatedEvent): Promise<void> {
+    try {
+      const pending = await signAndEnqueue(this.serviceConfig, event);
+      this.pendingDeposits.set(event.contractId, pending);
+      console.log(`[MPC] Monitoring tx ${pending.signedTxHash} for requestId=${pending.requestId}`);
+    } catch (err) {
+      console.error(
+        `[MPC] Failed to sign deposit: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async catchUp(): Promise<void> {
     console.log("[MPC] Catching up on active PendingEvmDeposit contracts...");
-    getActiveContracts(this.config.parties, PendingEvmDeposit.templateId)
-      .then((contracts) => {
-        for (const c of contracts) this.dispatchDeposit(c);
-        console.log(`[MPC] Catch-up complete (${contracts.length} active contracts)`);
-      })
-      .catch((err) => {
-        console.error(`[MPC] Catch-up failed: ${err instanceof Error ? err.message : String(err)}`);
-      });
+    try {
+      const contracts = await getActiveContracts(this.config.parties, PendingEvmDeposit.templateId);
+      for (const c of contracts) this.dispatchDeposit(c);
+      console.log(`[MPC] Catch-up complete (${contracts.length} active contracts)`);
+    } catch (err) {
+      console.error(`[MPC] Catch-up failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private startMonitor(): void {
+    console.log(`[MPC] Starting transaction monitor (interval=${MONITOR_INTERVAL_MS}ms)`);
+    this.monitorInterval = setInterval(() => void this.pollPendingDeposits(), MONITOR_INTERVAL_MS);
+  }
+
+  private async pollPendingDeposits(): Promise<void> {
+    this.pollCounter++;
+    if (this.pendingDeposits.size === 0) return;
+
+    for (const [contractId, deposit] of this.pendingDeposits) {
+      // Exponential backoff: check less frequently as checkCount grows
+      let skipFactor = 1;
+      if (deposit.checkCount > 15) skipFactor = 6;
+      else if (deposit.checkCount > 5) skipFactor = 3;
+
+      if (this.pollCounter % skipFactor !== 0) continue;
+
+      try {
+        const result = await checkPendingDeposit(this.serviceConfig, deposit);
+        deposit.checkCount++;
+
+        if (result === "done" || result === "failed") {
+          this.pendingDeposits.delete(contractId);
+          console.log(
+            `[MPC] Deposit ${result} for requestId=${deposit.requestId}, removed from queue`,
+          );
+        }
+      } catch (err) {
+        deposit.checkCount++;
+        console.error(
+          `[MPC] Unexpected monitor error for requestId=${deposit.requestId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
   }
 
   async start(): Promise<void> {
@@ -89,9 +143,10 @@ export class MpcServer {
       onError: (err) => console.error("[MPC] Stream error:", err),
       onReady: () => {
         this.resolveReady();
+        this.startMonitor();
         console.log("[MPC] Listening for PendingEvmDeposit events...");
       },
-      onReconnect: () => this.catchUp(),
+      onReconnect: () => void this.catchUp(),
     });
   }
 
@@ -103,6 +158,10 @@ export class MpcServer {
   }
 
   shutdown(): void {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = null;
+    }
     this.stream?.close();
     this.stream = null;
     console.log("[MPC] Shut down");

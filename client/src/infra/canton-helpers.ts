@@ -19,4 +19,3 @@ export function firstCreated(events: Event[] | undefined): CreatedEvent {
   if (!created) throw new Error("First event is not a CreatedEvent");
   return created;
 }
-

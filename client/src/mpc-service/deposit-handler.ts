@@ -1,8 +1,13 @@
-import { keccak256, createPublicClient, http, type Hex } from "viem";
+import { keccak256, createPublicClient, http, hexToNumber, type Hex } from "viem";
+import { privateKeyToAddress } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { serializeUnsignedTx, reconstructSignedTx } from "../evm/tx-builder.js";
 import { deriveChildPrivateKey, signEvmTxHash, signMpcResponse } from "./signer.js";
-import { exerciseChoice, type CreatedEvent } from "../infra/canton-client.js";
+import {
+  exerciseChoice,
+  type CreatedEvent,
+  type TransactionResponse,
+} from "../infra/canton-client.js";
 import { computeRequestId, type EvmTransactionParams } from "../mpc/crypto.js";
 import { chainIdHexToCaip2 } from "../mpc/address-derivation.js";
 import {
@@ -12,15 +17,94 @@ import {
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 
-export async function handlePendingEvmDeposit(params: {
+const ERC20_TRANSFER_TOPIC = keccak256(
+  new TextEncoder().encode("Transfer(address,address,uint256)"),
+);
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface MpcServiceConfig {
   orchCid: string;
   userId: string;
   actAs: string[];
   rootPrivateKey: Hex;
   rpcUrl: string;
-  event: CreatedEvent;
-}): Promise<void> {
-  const { orchCid, userId, actAs, rootPrivateKey, rpcUrl, event } = params;
+}
+
+export interface PendingDeposit {
+  requestId: string;
+  requester: string;
+  signedTxHash: Hex;
+  fromAddress: Hex;
+  nonce: number;
+  checkCount: number;
+}
+
+export type CheckResult = "pending" | "done" | "failed";
+
+// ---------------------------------------------------------------------------
+// Error classification
+// ---------------------------------------------------------------------------
+
+function isTransientError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("ECONNREFUSED") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("socket hang up") ||
+    msg.includes("500") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("504")
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Retry wrapper for Canton exerciseChoice
+// ---------------------------------------------------------------------------
+
+async function exerciseChoiceWithRetry(
+  userId: string,
+  actAs: string[],
+  templateId: string,
+  contractId: string,
+  choice: string,
+  choiceArgument: Record<string, unknown>,
+  maxAttempts = 3,
+): Promise<TransactionResponse> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await exerciseChoice(userId, actAs, templateId, contractId, choice, choiceArgument);
+    } catch (err) {
+      if (!isTransientError(err) || attempt === maxAttempts) throw err;
+      const delay = 1000 * 2 ** (attempt - 1);
+      console.warn(
+        `[MPC] Canton transient error (${choice}), retry ${attempt}/${maxAttempts} in ${delay}ms`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error("unreachable");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: Sign and enqueue
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate the deposit, sign on Canton, and return a PendingDeposit
+ * for the monitor loop to track.
+ */
+export async function signAndEnqueue(
+  config: MpcServiceConfig,
+  event: CreatedEvent,
+): Promise<PendingDeposit> {
+  const { orchCid, userId, actAs, rootPrivateKey } = config;
   const {
     requester,
     path: requestPath,
@@ -33,12 +117,11 @@ export async function handlePendingEvmDeposit(params: {
     algo,
     dest,
   } = event.createArgument as PendingEvmDeposit;
-  // vaultId (issuer-controlled discriminator) + issuer ensures different vaults
-  // never control the same EVM address via MPC KDF.
+
   const predecessorId = `${vaultId}${issuer}`;
   const keyDerivationPath = requestPath;
 
-  // Independently derive requestId from the verified authCid (not user-supplied authCidText)
+  // Validate requestId
   const caip2Id = chainIdHexToCaip2(evmParams.chainId);
   const computedRequestId = computeRequestId(
     requester,
@@ -59,15 +142,18 @@ export async function handlePendingEvmDeposit(params: {
 
   console.log(`[MPC] Processing PendingEvmDeposit requestId=${requestId}`);
 
-  // Phase 1: Sign the EVM transaction
+  // Derive child key and sender address
+  const childPrivateKey = deriveChildPrivateKey(rootPrivateKey, predecessorId, keyDerivationPath);
+  const fromAddress = privateKeyToAddress(childPrivateKey);
+  const txNonce = hexToNumber(`0x${evmParams.nonce}`);
+
+  // Sign EVM transaction
   const serializedUnsigned = serializeUnsignedTx(evmParams);
   const txHash = keccak256(serializedUnsigned);
-
-  const childPrivateKey = deriveChildPrivateKey(rootPrivateKey, predecessorId, keyDerivationPath);
   const { r, s, v } = signEvmTxHash(childPrivateKey, txHash);
 
   console.log(`[MPC] Signing EVM tx, exercising SignEvmTx`);
-  await exerciseChoice(userId, actAs, VAULT_ORCHESTRATOR, orchCid, "SignEvmTx", {
+  await exerciseChoiceWithRetry(userId, actAs, VAULT_ORCHESTRATOR, orchCid, "SignEvmTx", {
     requester,
     requestId,
     r,
@@ -76,7 +162,7 @@ export async function handlePendingEvmDeposit(params: {
   });
   console.log(`[MPC] SignEvmTx exercised`);
 
-  // Phase 2: Verify ETH outcome
+  // Compute signed tx hash for monitoring
   const signedTx = reconstructSignedTx(evmParams, {
     r: `0x${r}`,
     s: `0x${s}`,
@@ -84,24 +170,35 @@ export async function handlePendingEvmDeposit(params: {
   });
   const signedTxHash = keccak256(signedTx);
 
-  console.log(`[MPC] Polling Sepolia for receipt txHash=${signedTxHash}`);
-  const client = createPublicClient({
-    chain: sepolia,
-    transport: http(rpcUrl),
-  });
+  return {
+    requestId,
+    requester,
+    signedTxHash,
+    fromAddress,
+    nonce: txNonce,
+    checkCount: 0,
+  };
+}
 
-  // ERC-20 Transfer(address,address,uint256) event signature
-  const ERC20_TRANSFER_TOPIC = keccak256(
-    new TextEncoder().encode("Transfer(address,address,uint256)"),
-  );
+// ---------------------------------------------------------------------------
+// Phase 2: Monitor — check receipt and report outcome
+// ---------------------------------------------------------------------------
 
-  let mpcOutput: string;
+/**
+ * Check a pending deposit's EVM transaction status. Called by the monitor loop.
+ * Returns "pending" to keep polling, "done" on successful reporting, or "failed"
+ * on a fatal error.
+ */
+export async function checkPendingDeposit(
+  config: MpcServiceConfig,
+  deposit: PendingDeposit,
+): Promise<CheckResult> {
+  const client = createPublicClient({ chain: sepolia, transport: http(config.rpcUrl) });
+
+  let mpcOutput: string | null = null;
+
   try {
-    const receipt = await client.waitForTransactionReceipt({
-      hash: signedTxHash,
-      timeout: 120_000,
-      pollingInterval: 5_000,
-    });
+    const receipt = await client.getTransactionReceipt({ hash: deposit.signedTxHash });
 
     const hasTransferEvent = receipt.logs.some(
       (log) => log.topics[0]?.toLowerCase() === ERC20_TRANSFER_TOPIC.toLowerCase(),
@@ -112,27 +209,78 @@ export async function handlePendingEvmDeposit(params: {
     } else {
       mpcOutput = "00";
       console.warn(
-        `[MPC] Tx did not produce a valid transfer: status=${receipt.status}, hasTransferEvent=${hasTransferEvent}`,
+        `[MPC] Tx reverted or missing transfer: status=${receipt.status}, ` +
+          `hasTransferEvent=${hasTransferEvent}, requestId=${deposit.requestId}`,
       );
     }
-    console.log(
-      `[MPC] Receipt received, status=${receipt.status}, hasTransferEvent=${hasTransferEvent}`,
-    );
-  } catch (err) {
-    console.error(
-      `[MPC] Failed to get receipt: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    mpcOutput = "00";
+    console.log(`[MPC] Receipt found for requestId=${deposit.requestId}, status=${receipt.status}`);
+  } catch {
+    // No receipt yet — check if nonce was consumed (tx replaced)
+    try {
+      const currentNonce = await client.getTransactionCount({ address: deposit.fromAddress });
+      if (currentNonce > deposit.nonce) {
+        // Double-check: maybe the receipt just appeared
+        try {
+          await client.getTransactionReceipt({ hash: deposit.signedTxHash });
+          // Receipt appeared in the race — let the next poll cycle handle it
+          return "pending";
+        } catch {
+          console.warn(
+            `[MPC] Nonce consumed but no receipt — tx replaced. requestId=${deposit.requestId}`,
+          );
+          mpcOutput = "00";
+        }
+      }
+    } catch {
+      // RPC error during nonce check — try again next cycle
+      return "pending";
+    }
   }
 
-  const signature = signMpcResponse(rootPrivateKey, requestId, mpcOutput);
+  if (mpcOutput === null) return "pending";
 
-  console.log(`[MPC] Exercising ProvideEvmOutcomeSig`);
-  await exerciseChoice(userId, actAs, VAULT_ORCHESTRATOR, orchCid, "ProvideEvmOutcomeSig", {
-    requester,
-    requestId,
-    signature,
-    mpcOutput,
-  });
-  console.log(`[MPC] ProvideEvmOutcomeSig exercised for requestId=${requestId}`);
+  // Report outcome to Canton
+  return reportOutcome(config, deposit, mpcOutput);
+}
+
+async function reportOutcome(
+  config: MpcServiceConfig,
+  deposit: PendingDeposit,
+  mpcOutput: string,
+): Promise<CheckResult> {
+  const signature = signMpcResponse(config.rootPrivateKey, deposit.requestId, mpcOutput);
+
+  try {
+    console.log(`[MPC] Exercising ProvideEvmOutcomeSig for requestId=${deposit.requestId}`);
+    await exerciseChoiceWithRetry(
+      config.userId,
+      config.actAs,
+      VAULT_ORCHESTRATOR,
+      config.orchCid,
+      "ProvideEvmOutcomeSig",
+      {
+        requester: deposit.requester,
+        requestId: deposit.requestId,
+        signature,
+        mpcOutput,
+      },
+    );
+    console.log(
+      `[MPC] ProvideEvmOutcomeSig exercised for requestId=${deposit.requestId} (output=${mpcOutput})`,
+    );
+    return "done";
+  } catch (err) {
+    if (isTransientError(err)) {
+      console.warn(
+        `[MPC] Transient error reporting outcome, will retry. requestId=${deposit.requestId}`,
+      );
+      return "pending";
+    }
+    console.error(
+      `[MPC] Fatal error reporting outcome for requestId=${deposit.requestId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return "failed";
+  }
 }
