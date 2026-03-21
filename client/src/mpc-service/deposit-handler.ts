@@ -1,15 +1,14 @@
 import { keccak256, createPublicClient, http, type Hex } from "viem";
 import { sepolia } from "viem/chains";
-import {
-  serializeUnsignedTx,
-  reconstructSignedTx,
-  type CantonEvmParams,
-} from "../evm/tx-builder.js";
+import { serializeUnsignedTx, reconstructSignedTx } from "../evm/tx-builder.js";
 import { deriveChildPrivateKey, signEvmTxHash, signMpcResponse } from "./signer.js";
 import { exerciseChoice, type CreatedEvent } from "../infra/canton-client.js";
 import { computeRequestId, type EvmTransactionParams } from "../mpc/crypto.js";
 import { chainIdHexToCaip2 } from "../mpc/address-derivation.js";
-import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
+import {
+  VaultOrchestrator,
+  type PendingEvmDeposit,
+} from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 
@@ -22,24 +21,21 @@ export async function handlePendingEvmDeposit(params: {
   event: CreatedEvent;
 }): Promise<void> {
   const { orchCid, userId, actAs, rootPrivateKey, rpcUrl, event } = params;
-  const args = event.createArgument as Record<string, unknown>;
-  const requester = args.requester as string;
-  const requestPath = args.path as string;
-  const contractRequestId = args.requestId as string;
-  const evmParams = args.evmParams as CantonEvmParams;
-  const issuer = args.issuer as string;
-  // Read the verified authCid (injected by VaultOrchestrator) — not the user-supplied authCidText
-  const authCid = args.authCid as string;
-  const keyVersion = args.keyVersion as number;
-  const algo = args.algo as string;
-  const dest = args.dest as string;
-  const packageId = event.templateId.split(":")[0];
-  if (!packageId) {
-    throw new Error(`Invalid templateId format: ${event.templateId}`);
-  }
-  // packageId + issuer ensures different issuers never control the same EVM
-  // address via MPC KDF. For per-vault uniqueness, embed an ID in the issuer.
-  const predecessorId = `${packageId}${issuer}`;
+  const {
+    requester,
+    path: requestPath,
+    requestId: contractRequestId,
+    evmParams,
+    issuer,
+    vaultId,
+    authCid,
+    keyVersion,
+    algo,
+    dest,
+  } = event.createArgument as PendingEvmDeposit;
+  // vaultId (issuer-controlled discriminator) + issuer ensures different vaults
+  // never control the same EVM address via MPC KDF.
+  const predecessorId = `${vaultId}${issuer}`;
   const keyDerivationPath = requestPath;
 
   // Independently derive requestId from the verified authCid (not user-supplied authCidText)
@@ -48,7 +44,7 @@ export async function handlePendingEvmDeposit(params: {
     requester,
     evmParams as EvmTransactionParams,
     caip2Id,
-    keyVersion,
+    Number(keyVersion),
     requestPath,
     algo,
     dest,

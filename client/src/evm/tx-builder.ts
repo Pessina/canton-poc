@@ -7,6 +7,7 @@ import {
   hexToBigInt,
   hexToNumber,
   type Hex,
+  type TransactionSerializableEIP1559,
 } from "viem";
 import { sepolia } from "viem/chains";
 
@@ -32,14 +33,9 @@ function buildCalldata(functionSignature: string, args: Hex[]): Hex {
   return concat([selector, encodedArgs]);
 }
 
-/** Serialize an unsigned EIP-1559 tx from CantonEvmParams */
-export function serializeUnsignedTx(evmParams: CantonEvmParams): Hex {
-  const calldata = buildCalldata(
-    evmParams.functionSignature,
-    evmParams.args.map((a): Hex => `0x${a}`),
-  );
-
-  return serializeTransaction({
+/** Build a viem-compatible EIP-1559 tx request from CantonEvmParams */
+export function buildTxRequest(evmParams: CantonEvmParams): TransactionSerializableEIP1559 {
+  return {
     type: "eip1559",
     chainId: hexToNumber(`0x${evmParams.chainId}`),
     nonce: hexToNumber(`0x${evmParams.nonce}`),
@@ -48,40 +44,29 @@ export function serializeUnsignedTx(evmParams: CantonEvmParams): Hex {
     gas: hexToBigInt(`0x${evmParams.gasLimit}`),
     to: `0x${evmParams.to}`,
     value: hexToBigInt(`0x${evmParams.value}`),
-    data: calldata,
+    data: buildCalldata(
+      evmParams.functionSignature,
+      evmParams.args.map((a): Hex => `0x${a}`),
+    ),
     accessList: [],
-  });
+  };
 }
 
-/** Reconstruct full signed EVM tx from evmParams + signature */
+/** Serialize an unsigned EIP-1559 tx from CantonEvmParams */
+export function serializeUnsignedTx(evmParams: CantonEvmParams): Hex {
+  return serializeTransaction(buildTxRequest(evmParams));
+}
+
+/** Append signature to produce a signed EIP-1559 tx */
 export function reconstructSignedTx(
   evmParams: CantonEvmParams,
   signature: { r: Hex; s: Hex; v: number },
 ): Hex {
-  const calldata = buildCalldata(
-    evmParams.functionSignature,
-    evmParams.args.map((a): Hex => `0x${a}`),
-  );
-
-  return serializeTransaction(
-    {
-      type: "eip1559",
-      chainId: hexToNumber(`0x${evmParams.chainId}`),
-      nonce: hexToNumber(`0x${evmParams.nonce}`),
-      maxPriorityFeePerGas: hexToBigInt(`0x${evmParams.maxPriorityFee}`),
-      maxFeePerGas: hexToBigInt(`0x${evmParams.maxFeePerGas}`),
-      gas: hexToBigInt(`0x${evmParams.gasLimit}`),
-      to: `0x${evmParams.to}`,
-      value: hexToBigInt(`0x${evmParams.value}`),
-      data: calldata,
-      accessList: [],
-    },
-    {
-      r: signature.r,
-      s: signature.s,
-      yParity: signature.v,
-    },
-  );
+  return serializeTransaction(buildTxRequest(evmParams), {
+    r: signature.r,
+    s: signature.s,
+    yParity: signature.v,
+  });
 }
 
 /** Submit raw signed tx to Ethereum RPC */

@@ -43,6 +43,7 @@ template PendingEvmDeposit
     requestId      : BytesHex
     path           : Text
     evmParams      : EvmTransactionParams
+    vaultId        : Text         -- issuer-controlled discriminator for MPC key derivation (from VaultOrchestrator)
     authCidText    : Text         -- user-supplied, DepositAuthorization contractId as text (nonce for requestId)
     authCid        : ContractId DepositAuthorization  -- injected by VaultOrchestrator, verified
     keyVersion     : Int
@@ -81,6 +82,7 @@ template VaultOrchestrator
     mpc          : Party
     mpcPublicKey : PublicKeyHex
     vaultAddress : BytesHex
+    vaultId      : Text           -- issuer-controlled discriminator for MPC key derivation
   where
     signatory issuer
     observer mpc
@@ -144,7 +146,7 @@ template VaultOrchestrator
         let requestId = computeRequestId sender evmParams caip2Id keyVersion fullPath algo dest authCidText
         create PendingEvmDeposit with
           issuer; requester; mpc; requestId; path = fullPath; evmParams
-          authCidText; authCid; keyVersion; algo; dest
+          vaultId; authCidText; authCid; keyVersion; algo; dest
 
     nonconsuming choice SignEvmTx : ContractId EcdsaSignature
       with

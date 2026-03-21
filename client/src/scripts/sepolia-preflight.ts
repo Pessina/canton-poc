@@ -20,10 +20,8 @@ import { createPublicClient, http, parseAbi, type Hex } from "viem";
 import { sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { uploadDar, allocateParty } from "../infra/canton-client.js";
-import { packageIdFromTemplateId } from "../infra/canton-helpers.js";
 import { deriveDepositAddress } from "../mpc/address-derivation.js";
 import { DEPOSIT_AMOUNT } from "../test/helpers/sepolia-helpers.js";
-import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
@@ -51,8 +49,12 @@ async function main() {
   console.log(`Canton issuer party:    ${issuer}`);
   console.log(`Canton requester party: ${requester}`);
 
-  const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
-  const predecessorId = `${packageId}${issuer}`;
+  const vaultId = process.env.VAULT_ID;
+  if (!vaultId) {
+    console.error("VAULT_ID env var is required");
+    process.exit(1);
+  }
+  const predecessorId = `${vaultId}${issuer}`;
   const requestPath = requester;
   const depositDerivationPath = `${requester},${requestPath}`;
   const depositAddress = deriveDepositAddress(
@@ -62,7 +64,7 @@ async function main() {
   );
   const vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, predecessorId, "root");
 
-  console.log(`Package ID used for derivation: ${packageId}`);
+  console.log(`Vault ID: ${vaultId}`);
   console.log(`Predecessor ID: ${predecessorId}`);
   console.log(`Deposit derivation path: ${depositDerivationPath}`);
 

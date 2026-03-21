@@ -127,6 +127,7 @@ test5_depositLifecycle = do
       mpc
       mpcPublicKey = testPubKeyHex
       vaultAddress = sampleVaultAddress
+      vaultId = "test-vault"
 
   -- Auth card flow
   proposalCid <- submit (actAs depositor <> readAs issuer) do
@@ -219,7 +220,7 @@ testRequestDepositAuth = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with
@@ -242,7 +243,7 @@ testApproveDepositAuth = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with
@@ -272,7 +273,7 @@ testRequestEvmDepositBurnsAuthCard = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with
@@ -317,7 +318,7 @@ testClaimAsRequester = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with
@@ -392,7 +393,7 @@ testClaimRequesterMismatchFails = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with
@@ -455,7 +456,7 @@ testAuthCardNoRemainingUsesFails = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   -- Directly create a DepositAuthorization with 0 remaining uses
   authCid <- submit issuer do
@@ -630,7 +631,7 @@ testClaimHappyPath = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = claimTestPubKey; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = claimTestPubKey; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   -- Create a dummy auth for the authCid field
   dummyAuthCid <- submit issuer do
@@ -642,7 +643,7 @@ testClaimHappyPath = do
     createCmd PendingEvmDeposit with
       issuer; requester = depositor; mpc
       requestId = claimTestRequestId
-      path = "test"; evmParams = sampleEvmParams
+      path = "test"; evmParams = sampleEvmParams; vaultId = "test-vault"
       authCidText = ""; authCid = dummyAuthCid; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
 
   ecdsaCid <- submit issuer do
@@ -687,7 +688,7 @@ testApproveDepositAuthWrongController = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with
@@ -709,7 +710,7 @@ testSignEvmTxWrongController = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   submitMustFail depositor do
     exerciseCmd orchCid SignEvmTx with
@@ -727,7 +728,7 @@ testProvideOutcomeSigWrongController = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   submitMustFail depositor do
     exerciseCmd orchCid ProvideEvmOutcomeSig with
@@ -747,7 +748,7 @@ testAuthCardWrongIssuer = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   -- Auth card signed by rogue, not issuer
   authCid <- submit rogue do
@@ -773,7 +774,7 @@ testAuthCardWrongOwner = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   -- Auth card owned by otherUser, not depositor
   authCid <- submit issuer do
@@ -798,7 +799,7 @@ testWrongFunctionSignature = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with requester = depositor
@@ -824,7 +825,7 @@ testWrongRecipient = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   proposalCid <- submit (actAs depositor <> readAs issuer) do
     exerciseCmd orchCid RequestDepositAuth with requester = depositor
@@ -853,7 +854,7 @@ testClaimRejectsMpcFailure = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   dummyAuthCid <- submit issuer do
     createCmd DepositAuthorization with
@@ -862,7 +863,7 @@ testClaimRejectsMpcFailure = do
   pendingCid <- submit issuer do
     createCmd PendingEvmDeposit with
       issuer; requester = depositor; mpc
-      requestId = "bb"; path = "test"; evmParams = sampleEvmParams
+      requestId = "bb"; path = "test"; evmParams = sampleEvmParams; vaultId = "test-vault"
       authCidText = ""; authCid = dummyAuthCid; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
 
   ecdsaCid <- submit issuer do
@@ -890,7 +891,7 @@ testClaimRejectsRequestIdMismatch = do
 
   orchCid <- submit issuer do
     createCmd VaultOrchestrator with
-      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress
+      issuer; mpc; mpcPublicKey = testPubKeyHex; vaultAddress = sampleVaultAddress; vaultId = "test-vault"
 
   dummyAuthCid <- submit issuer do
     createCmd DepositAuthorization with
@@ -899,7 +900,7 @@ testClaimRejectsRequestIdMismatch = do
   pendingCid <- submit issuer do
     createCmd PendingEvmDeposit with
       issuer; requester = depositor; mpc
-      requestId = "aa"; path = "test"; evmParams = sampleEvmParams
+      requestId = "aa"; path = "test"; evmParams = sampleEvmParams; vaultId = "test-vault"
       authCidText = ""; authCid = dummyAuthCid; keyVersion = 1; algo = "ECDSA"; dest = "ethereum"
 
   ecdsaCid <- submit issuer do

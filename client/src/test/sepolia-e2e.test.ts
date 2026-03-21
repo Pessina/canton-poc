@@ -11,12 +11,13 @@ import {
   getDisclosedContract,
   type CreatedEvent,
 } from "../infra/canton-client.js";
-import { findCreated, firstCreated, packageIdFromTemplateId } from "../infra/canton-helpers.js";
+import { findCreated, firstCreated } from "../infra/canton-helpers.js";
 import {
   VaultOrchestrator,
   Erc20Holding,
   EcdsaSignature,
   EvmTxOutcomeSignature,
+  PendingEvmDeposit,
 } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import { MpcServer } from "../mpc-service/server.js";
 import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
@@ -74,7 +75,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
   let mpc: string;
   let orchCid: string;
   let orchDisclosure: Awaited<ReturnType<typeof getDisclosedContract>>;
-  let packageId: string;
+  const VAULT_ID = "canton-mpc-poc";
   let vaultAddressPadded: string;
 
   const USER_ID = "sepolia-e2e";
@@ -87,10 +88,9 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     mpc = await allocateParty("Mpc");
     await createUser(USER_ID, issuer, [requester, mpc]);
 
-    packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
     const vaultAddress = deriveDepositAddress(
       env!.MPC_ROOT_PUBLIC_KEY,
-      `${packageId}${issuer}`,
+      `${VAULT_ID}${issuer}`,
       "root",
     );
     vaultAddressPadded = vaultAddress.slice(2).padStart(64, "0");
@@ -101,6 +101,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       mpc,
       mpcPublicKey: mpcPubKeySpki,
       vaultAddress: vaultAddressPadded,
+      vaultId: VAULT_ID,
     });
     const orchEvent = findCreated(orchResult.transaction.events, "VaultOrchestrator");
     orchCid = orchEvent.contractId;
@@ -127,7 +128,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     const requesterPath = requester;
     const depositAddress = deriveDepositAddress(
       env!.MPC_ROOT_PUBLIC_KEY,
-      `${packageId}${issuer}`,
+      `${VAULT_ID}${issuer}`,
       `${requester},${requesterPath}`,
     );
     console.log(`[e2e] Deposit address derived: ${depositAddress}`);
@@ -219,8 +220,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
 
     const pending = findCreated(depositResult.transaction.events, "PendingEvmDeposit");
     const pendingCid = pending.contractId;
-    const pendingArgs = pending.createArgument as Record<string, unknown>;
-    const requestId = pendingArgs.requestId as string;
+    const { requestId, path: pendingPath } = pending.createArgument as PendingEvmDeposit;
 
     const caip2Id = chainIdHexToCaip2(evmParams.chainId);
     const tsRequestId = computeRequestId(
@@ -228,7 +228,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       evmParams,
       caip2Id,
       KEY_VERSION,
-      pendingArgs.path as string,
+      pendingPath,
       ALGO,
       DEST,
       authCid,
@@ -245,13 +245,13 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       "EcdsaSignature",
     );
     const ecdsaCid = ecdsaSig.contractId;
-    const ecdsaArgs = ecdsaSig.createArgument as Record<string, unknown>;
+    const ecdsaArgs = ecdsaSig.createArgument as EcdsaSignature;
     console.log("[e2e] EcdsaSignature observed");
 
     // ── User submits signed tx to Sepolia ──
     const signedTx = reconstructSignedTx(evmParams, {
-      r: `0x${ecdsaArgs.r as string}`,
-      s: `0x${ecdsaArgs.s as string}`,
+      r: `0x${ecdsaArgs.r}`,
+      s: `0x${ecdsaArgs.s}`,
       v: Number(ecdsaArgs.v),
     });
     const txHash = await submitRawTransaction(env!.SEPOLIA_RPC_URL, signedTx);
@@ -265,7 +265,7 @@ describeIf("sepolia e2e deposit lifecycle", () => {
       "EvmTxOutcomeSignature",
     );
     const outcomeCid = outcome.contractId;
-    const outcomeArgs = outcome.createArgument as Record<string, unknown>;
+    const outcomeArgs = outcome.createArgument as EvmTxOutcomeSignature;
     expect(outcomeArgs.mpcOutput).toBe("01");
     console.log("[e2e] EvmTxOutcomeSignature observed");
 
@@ -287,15 +287,15 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     );
 
     const holding = findCreated(claimResult.transaction.events, "Erc20Holding");
-    const holdingArgs = holding.createArgument as Record<string, unknown>;
+    const holdingArgs = holding.createArgument as Erc20Holding;
     expect(holdingArgs.owner).toBe(requester);
     expect(holdingArgs.issuer).toBe(issuer);
     expect(holdingArgs.amount).toBe(amountPadded);
 
     const activeHoldings = await getActiveContracts([issuer, requester], ERC20_HOLDING);
-    expect(
-      activeHoldings.some((c) => (c.createArgument as Record<string, unknown>).owner === requester),
-    ).toBe(true);
+    expect(activeHoldings.some((c) => (c.createArgument as Erc20Holding).owner === requester)).toBe(
+      true,
+    );
     console.log("[e2e] All assertions passed");
   }, 300_000);
 });

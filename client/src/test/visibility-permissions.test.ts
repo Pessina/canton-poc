@@ -13,7 +13,7 @@ import {
   type CreatedEvent,
   type DisclosedContract,
 } from "../infra/canton-client.js";
-import { findCreated, firstCreated, packageIdFromTemplateId } from "../infra/canton-helpers.js";
+import { findCreated, firstCreated } from "../infra/canton-helpers.js";
 import {
   VaultOrchestrator,
   DepositAuthProposal,
@@ -110,14 +110,15 @@ describe("ledger visibility + permission model", () => {
     await createUser(ISSUER_USER, issuer);
     await createUser(REQUESTER_USER, requester);
 
-    const packageId = packageIdFromTemplateId(VaultOrchestrator.templateIdWithPackageId);
-    vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, `${packageId}${issuer}`, "root");
+    const VAULT_ID = "test-vault";
+    vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, `${VAULT_ID}${issuer}`, "root");
 
     const orchResult = await createContract(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
       mpc,
       mpcPublicKey: MPC_PUB_KEY_SPKI,
       vaultAddress: vaultAddress.slice(2).padStart(64, "0"),
+      vaultId: VAULT_ID,
     });
     orchCid = firstCreated(orchResult.transaction.events).contractId;
 
@@ -150,7 +151,7 @@ describe("ledger visibility + permission model", () => {
       [orchDisclosure],
     );
     const proposal = findCreated(requestResult.transaction.events, "DepositAuthProposal");
-    const proposalArgs = proposal.createArgument as Record<string, unknown>;
+    const proposalArgs = proposal.createArgument as DepositAuthProposal;
     expect(proposalArgs.issuer).toBe(issuer);
     expect(proposalArgs.owner).toBe(requester);
 
@@ -238,8 +239,7 @@ describe("ledger visibility + permission model", () => {
     );
     const pending = findCreated(pendingResult.transaction.events, "PendingEvmDeposit");
     const pendingCid = pending.contractId;
-    const pendingArgs = pending.createArgument as Record<string, unknown>;
-    const requestId = pendingArgs.requestId as string;
+    const { requestId } = pending.createArgument as PendingEvmDeposit;
 
     // PendingEvmDeposit: signatory=issuer, observer=mpc,requester
     await assertVisibility(PENDING_EVM_DEPOSIT, pendingCid, [issuer, requester, mpc], []);
@@ -327,7 +327,7 @@ describe("ledger visibility + permission model", () => {
       [orchDisclosure],
     );
     const holding = findCreated(claimResult.transaction.events, "Erc20Holding");
-    const holdingArgs = holding.createArgument as Record<string, unknown>;
+    const holdingArgs = holding.createArgument as Erc20Holding;
     expect(holdingArgs.owner).toBe(requester);
     expect(holdingArgs.issuer).toBe(issuer);
 
