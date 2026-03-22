@@ -19,7 +19,7 @@ testKeccak256KnownVector = do
   assertMsg ("keccak256 mismatch: got " <> result) (result == expected)
 
 ------------------------------------------------------------------------
--- padHex / hex packing
+-- padLeft / hex packing
 ------------------------------------------------------------------------
 
 testHexPacking : Script ()

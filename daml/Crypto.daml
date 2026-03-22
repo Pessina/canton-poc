@@ -5,6 +5,7 @@ import qualified DA.Text
 
 import DA.Crypto.Text
   ( BytesHex
+  , byteCount
   , keccak256
   , packHexBytes
   , toHex
@@ -15,8 +16,15 @@ import DA.Crypto.Text
 -- Hex utilities
 -- ---------------------------------------------------------------------------
 
-padHex : BytesHex -> Int -> BytesHex
-padHex hex width = fromSome (packHexBytes hex width)
+-- | Left-pad hex to the given byte width (for uint, int, address).
+padLeft : BytesHex -> Int -> BytesHex
+padLeft hex width = fromSome (packHexBytes hex width)
+
+-- | Assert the value is exactly 32 bytes. Use for bytes32 fields.
+assertBytes32 : BytesHex -> BytesHex
+assertBytes32 hex =
+  if byteCount hex == 32 then hex
+  else error ("Expected bytes32, got " <> show (byteCount hex) <> " bytes")
 
 ensureEvenHex : BytesHex -> BytesHex
 ensureEvenHex hex =

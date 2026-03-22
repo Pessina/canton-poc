@@ -7,7 +7,7 @@ import DA.Crypto.Text
   )
 
 import Types (EvmTransactionParams(..))
-import Crypto (padHex, hashText, hashBytesList, eip712Hash)
+import Crypto (padLeft, assertBytes32, safeKeccak256, hashText, hashBytesList, eip712Hash)
 
 -- ---------------------------------------------------------------------------
 -- EIP-712 type hashes
@@ -30,15 +30,15 @@ hashEvmParams : EvmTransactionParams -> BytesHex
 hashEvmParams p =
   keccak256 $
        evmParamsTypeHash
-    <> padHex p.to 32
+    <> padLeft p.to 32
     <> hashText p.functionSignature
     <> hashBytesList p.args
-    <> padHex p.value          32
-    <> padHex p.nonce          32
-    <> padHex p.gasLimit       32
-    <> padHex p.maxFeePerGas   32
-    <> padHex p.maxPriorityFee 32
-    <> padHex p.chainId        32
+    <> padLeft p.value          32
+    <> padLeft p.nonce          32
+    <> padLeft p.gasLimit       32
+    <> padLeft p.maxFeePerGas   32
+    <> padLeft p.maxPriorityFee 32
+    <> padLeft p.chainId        32
 
 -- ---------------------------------------------------------------------------
 -- Request ID and response hash
@@ -51,7 +51,7 @@ computeRequestId sender evmParams caip2Id keyVersion path algo dest authCidText 
     <> hashText sender
     <> hashEvmParams evmParams
     <> hashText caip2Id
-    <> padHex (toHex keyVersion) 32
+    <> padLeft (toHex keyVersion) 32
     <> hashText path
     <> hashText algo
     <> hashText dest
@@ -59,6 +59,4 @@ computeRequestId sender evmParams caip2Id keyVersion path algo dest authCidText 
 
 computeResponseHash : BytesHex -> BytesHex -> BytesHex
 computeResponseHash requestId output =
-  eip712Hash $ keccak256 (responseTypeHash <> padHex requestId 32 <> safeKeccak256 output)
-  where
-    safeKeccak256 hex = if hex == "" then "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" else keccak256 hex
+  eip712Hash $ keccak256 (responseTypeHash <> assertBytes32 requestId <> safeKeccak256 output)
