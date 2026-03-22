@@ -18,5 +18,5 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src", "generated/api", "eslint.config.ts"]
+  "include": ["src", "generated/api", "eslint.config.ts", "vitest.config.ts"]
 }

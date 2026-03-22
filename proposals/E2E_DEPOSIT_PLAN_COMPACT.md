@@ -12,13 +12,13 @@ signing service, giving cryptographic proof of every step.
 2. Issuer approves via `ApproveDepositAuth`, archiving the proposal and creating
    a `DepositAuthorization` (auth card) with a hard use-limit
 3. User sends ERC20 tokens to a **deposit address** on Sepolia
-   (derived from MPC root public key, predecessorId=packageId+issuer, path=sender+userPath)
+   (derived from MPC root public key, predecessorId=vaultId+issuer, path=sender+userPath)
 4. User exercises `RequestEvmDeposit` on Canton to request a **sweep from the deposit address to the
    vault address**
-   (derived from MPC root public key, predecessorId=packageId+issuer, path="root")
+   (derived from MPC root public key, predecessorId=vaultId+issuer, path="root")
    via an ERC20 `transfer` call. The choice validates the `DepositAuthorization`, burns one
-   use, and creates a `PendingEvmDeposit`.
-5. MPC Service observes the `PendingEvmDeposit`
+   use, and creates a `PendingEvmTx` with `source = DepositSource`.
+5. MPC Service observes the `PendingEvmTx`
 6. MPC Service builds, serializes, and signs the EVM sweep transaction
 7. MPC Service exercises `SignEvmTx` on Canton, creating an `EcdsaSignature`
 8. User observes the `EcdsaSignature`, reconstructs the signed transaction,
@@ -61,13 +61,13 @@ wrapped ERC-20 balance.
  |                              | validates auth card,         |                              |
  |                              | burns one use                |                              |
  |                              |                              |                              |
- |                              | 5. creates PendingEvmDeposit |                              |
- |                              |    (path, evmParams,         |                              |
+ |                              | 5. creates PendingEvmTx      |                              |
+ |                              |    (source=DepositSource,    |                              |
+ |                              |     path, evmParams,         |                              |
  |                              |     requester,               |                              |
- |                              |     authCidText,             |                              |
- |                              |     authCid)                 |                              |
+ |                              |     nonceCidText)            |                              |
  |                              |                              |                              |
- |                              |    observes PendingEvmDeposit|                              |
+ |                              |    observes PendingEvmTx     |                              |
  |                              |----------------------------->|                              |
  |                              |                              |                              |
  |                              |                              | 6. buildCalldata             |
@@ -105,7 +105,7 @@ wrapped ERC-20 balance.
  |    ClaimEvmDeposit           |                              |                              |
  |-- pending, outcome, ecdsa -->|                              |                              |
  |                              |                              |                              |
- |                              | 12. archive PendingEvmDeposit|                              |
+ |                              | 12. archive PendingEvmTx     |                              |
  |                              |     archive EvmTxOutcomeSig  |                              |
  |                              |     archive EcdsaSignature   |                              |
  |                              |                              |                              |
@@ -121,7 +121,7 @@ wrapped ERC-20 balance.
 
 Singleton orchestrator contract. Hosts all choices that drive the deposit
 lifecycle. All evidence contracts (`EcdsaSignature`,
-`EvmTxOutcomeSignature`) and state contracts (`PendingEvmDeposit`,
+`EvmTxOutcomeSignature`) and state contracts (`PendingEvmTx`,
 `Erc20Holding`) are created through its choices. Its `created_event_blob`
 is disclosed off-chain so that users can attach it to command submissions
 
@@ -132,13 +132,14 @@ template VaultOrchestrator
     mpc          : Party          -- the MPC signing service party
     mpcPublicKey : PublicKeyHex   -- MPC root public key for signature verification
     vaultAddress : BytesHex       -- centralized sweep address (derived from MPC root key + vault derivation path)
+    vaultId      : Text           -- issuer-controlled discriminator for MPC key derivation
   where
     signatory issuer
     observer mpc
 
     nonconsuming choice RequestDepositAuth   : ContractId DepositAuthProposal
     nonconsuming choice ApproveDepositAuth   : ContractId DepositAuthorization
-    nonconsuming choice RequestEvmDeposit    : ContractId PendingEvmDeposit
+    nonconsuming choice RequestEvmDeposit    : ContractId PendingEvmTx
     nonconsuming choice SignEvmTx            : ContractId EcdsaSignature
     nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
     nonconsuming choice ClaimEvmDeposit      : ContractId Erc20Holding
@@ -207,28 +208,67 @@ template DepositAuthorization
     observer mpc, owner
 ```
 
-### `PendingEvmDeposit` (Erc20Vault.daml)
+### `TxSource` (Types.daml)
 
-Anchor contract for the deposit lifecycle.
+Variant that doubles as **type discriminator** and **provenance CID** for
+`PendingEvmTx`. Tells finalization choices which flow the transaction belongs
+to, while preserving a type-safe reference to the consumed source contract.
 
 ```daml
-template PendingEvmDeposit
+data TxSource
+  = DepositSource (ContractId DepositAuthorization)
+  | WithdrawalSource (ContractId Erc20Holding)
+  deriving (Eq, Show)
+```
+
+### `PendingEvmTx` (Erc20Vault.daml)
+
+Anchor contract for both deposit and withdrawal lifecycles. The MPC service
+observes this single template regardless of flow — it reads `evmParams`,
+`path`, `vaultId`, `issuer` and signs.
+
+```daml
+template PendingEvmTx
   with
-    issuer         : Party        -- the party that operates the vault
-    requester      : Party        -- the user initiating the deposit
-    mpc            : Party        -- the MPC signing service party
-    requestId      : BytesHex
-    path           : Text         -- user-supplied derivation sub-path
-    evmParams      : EvmTransactionParams
-    authCidText      : Text         -- user-supplied, DepositAuthorization contractId as text (nonce for requestId)
-    authCid        : ContractId DepositAuthorization  -- injected by VaultOrchestrator, verified
-    keyVersion     : Int          -- e.g., 1
-    algo           : Text         -- e.g., "ECDSA"
-    dest           : Text         -- e.g., "ethereum"
+    issuer       : Party        -- the party that operates the vault
+    requester    : Party        -- the user initiating the transaction
+    mpc          : Party        -- the MPC signing service party
+    requestId    : BytesHex
+    path         : Text         -- deposit: sender + "," + userPath; withdrawal: "root"
+    evmParams    : EvmTransactionParams
+    vaultId      : Text         -- issuer-controlled discriminator (from VaultOrchestrator)
+    nonceCidText : Text         -- user-supplied, source contractId as text (nonce for requestId)
+    source       : TxSource     -- discriminator + typed provenance CID
+    keyVersion   : Int          -- e.g., 1
+    algo         : Text         -- e.g., "ECDSA"
+    dest         : Text         -- e.g., "ethereum"
   where
     signatory issuer
     observer mpc, requester
 ```
+
+`PendingEvmTx` carries two nonce references:
+
+- **`nonceCidText : Text`** — user-supplied string form of the consumed
+  contract ID (`DepositAuthorization` for deposits, `Erc20Holding` for
+  withdrawals). Input to `computeRequestId`; globally unique per use
+  (archive + recreate), guaranteeing `requestId` uniqueness.
+
+- **`source : TxSource`** — variant carrying the typed `ContractId`,
+  injected by `VaultOrchestrator` after fetch + validation. Non-spoofable;
+  MPC reads it directly from the contract payload.
+
+**Key derivation (predecessorId + path):** `predecessorId = vaultId + issuer`
+(`vaultId` is the issuer-controlled discriminator, concatenated with the issuer
+party identifier). This ensures different vaults never control the same EVM
+address via the MPC KDF. The MPC reads both `vaultId` and `issuer` directly
+from the `PendingEvmTx` payload.
+The `vaultId` is set once on `VaultOrchestrator` at deployment and is immutable,
+allowing the same issuer to run multiple independent vaults with different
+keyspaces.
+
+- **Vault address**: path = `"root"`
+- **Deposit address**: path = `sender + "," + user-supplied path argument`
 
 ### `EcdsaSignature` (Erc20Vault.daml)
 
@@ -314,12 +354,12 @@ nonconsuming choice ApproveDepositAuth : ContractId DepositAuthorization
 **`RequestEvmDeposit`** — user creates a deposit request.
 
 ```daml
-nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
+nonconsuming choice RequestEvmDeposit : ContractId PendingEvmTx
   with
     requester      : Party
     path           : Text
     evmParams      : EvmTransactionParams
-    authCidText      : Text       -- user-supplied, DepositAuthorization contractId as text (nonce)
+    authCidText    : Text       -- user-supplied, DepositAuthorization contractId as text (nonce)
     keyVersion     : Int
     algo           : Text
     dest           : Text
@@ -347,30 +387,11 @@ nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
     let fullPath = sender <> "," <> path
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
     let requestId = computeRequestId sender evmParams caip2Id keyVersion fullPath algo dest authCidText
-    create PendingEvmDeposit with
+    create PendingEvmTx with
       issuer; requester; mpc; requestId; path = fullPath; evmParams
-      authCidText; authCid; keyVersion; algo; dest
+      vaultId; nonceCidText = authCidText; source = DepositSource authCid
+      keyVersion; algo; dest
 ```
-
-`PendingEvmDeposit` carries two auth references:
-
-- **`authCidText : Text`** — user-supplied string form of the
-  `DepositAuthorization` contract ID. Input to `computeRequestId`; globally
-  unique per use (archive + recreate), guaranteeing `requestId` uniqueness.
-
-- **`authCid : ContractId DepositAuthorization`** — injected by
-  `VaultOrchestrator` after fetch + validation. Non-spoofable; MPC reads it
-  directly from the contract payload.
-
-**Key derivation (predecessorId + path):** `predecessorId = packageId + issuer`
-(DAR package ID concatenated with the issuer party identifier). This ensures
-different issuers never control the same EVM address via the MPC KDF.
-The MPC reads `issuer` from the `PendingEvmDeposit` payload and extracts
-`packageId` from its `templateId` (available on the observed `CreatedEvent`
-as `packageId:Module:Entity`).
-
-- **Vault address**: path = `"root"`
-- **Deposit address**: path = `sender + "," + user-supplied path argument`
 
 **`SignEvmTx`** — MPC posts its EVM transaction signature.
 
@@ -404,14 +425,14 @@ nonconsuming choice ProvideEvmOutcomeSig : ContractId EvmTxOutcomeSignature
 ```
 
 **`ClaimEvmDeposit`** — user triggers claim after observing the outcome
-signature. Archives all evidence contracts (`PendingEvmDeposit`,
-`EvmTxOutcomeSignature`, `EcdsaSignature`).
+signature. Asserts `DepositSource` and archives all evidence contracts
+(`PendingEvmTx`, `EvmTxOutcomeSignature`, `EcdsaSignature`).
 
 ```daml
 nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
   with
     requester   : Party
-    pendingCid  : ContractId PendingEvmDeposit
+    pendingCid  : ContractId PendingEvmTx
     outcomeCid  : ContractId EvmTxOutcomeSignature
     ecdsaCid    : ContractId EcdsaSignature
   controller requester
@@ -419,6 +440,10 @@ nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
     pending <- fetch pendingCid
     outcome <- fetch outcomeCid
     ecdsa   <- fetch ecdsaCid
+
+    case pending.source of
+      DepositSource _ -> pure ()
+      _ -> abort "PendingEvmTx is not a deposit"
 
     assertMsg "Pending issuer mismatch"
       (pending.issuer == issuer)

@@ -1,0 +1,197 @@
+module TestHexCompare where
+
+import Daml.Script
+import qualified DA.Text
+import DA.Crypto.Text (BytesHex, maxUInt256Hex)
+import HexCompare
+
+-- ---------------------------------------------------------------------------
+-- Test vectors (32-byte / 64 hex char slots)
+-- ---------------------------------------------------------------------------
+
+zero : BytesHex
+zero = "0000000000000000000000000000000000000000000000000000000000000000"
+
+one : BytesHex
+one = "0000000000000000000000000000000000000000000000000000000000000001"
+
+two : BytesHex
+two = "0000000000000000000000000000000000000000000000000000000000000002"
+
+maxVal : BytesHex
+maxVal = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+-- int256(-1) = all ff
+negOne : BytesHex
+negOne = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+-- int256(-2)
+negTwo : BytesHex
+negTwo = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+
+-- int256(-128)
+neg128 : BytesHex
+neg128 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff80"
+
+-- int256(min) = -2^255
+minInt256 : BytesHex
+minInt256 = "8000000000000000000000000000000000000000000000000000000000000000"
+
+-- int256(max positive) = 2^255 - 1
+maxPosInt256 : BytesHex
+maxPosInt256 = "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+-- int256(maxBound Int64) = 2^63-1
+maxInt64 : BytesHex
+maxInt64 = "0000000000000000000000000000000000000000000000007fffffffffffffff"
+
+-- A uint128 value (2^127 + 1)
+largeUint128 : BytesHex
+largeUint128 = "0000000000000000000000000000000080000000000000000000000000000001"
+
+-- ---------------------------------------------------------------------------
+-- Tests: unsigned comparison
+-- ---------------------------------------------------------------------------
+
+testHexCompareUint : Script ()
+testHexCompareUint = do
+  assertMsg "1 < 2" (hexCompareUint one two == LT)
+  assertMsg "2 > 1" (hexCompareUint two one == GT)
+  assertMsg "1 == 1" (hexCompareUint one one == EQ)
+  assertMsg "0 < 1" (hexCompareUint zero one == LT)
+  assertMsg "0 < max" (hexCompareUint zero maxVal == LT)
+  assertMsg "max > 1" (hexCompareUint maxVal one == GT)
+  assertMsg "max == max" (hexCompareUint maxVal maxVal == EQ)
+  assertMsg "large uint128 > 1" (hexCompareUint largeUint128 one == GT)
+  assertMsg "large uint128 < max" (hexCompareUint largeUint128 maxVal == LT)
+
+-- ---------------------------------------------------------------------------
+-- Tests: unsigned convenience wrappers
+-- ---------------------------------------------------------------------------
+
+testHexConvenienceUint : Script ()
+testHexConvenienceUint = do
+  assertMsg "hexEqUint" (hexEqUint one one)
+  assertMsg "not hexEqUint" (not (hexEqUint one two))
+  assertMsg "hexGtUint" (hexGtUint two one)
+  assertMsg "not hexGtUint" (not (hexGtUint one two))
+  assertMsg "hexGteUint (greater)" (hexGteUint two one)
+  assertMsg "hexGteUint (equal)" (hexGteUint one one)
+  assertMsg "not hexGteUint" (not (hexGteUint one two))
+  assertMsg "hexLtUint" (hexLtUint one two)
+  assertMsg "not hexLtUint" (not (hexLtUint two one))
+  assertMsg "hexLteUint (less)" (hexLteUint one two)
+  assertMsg "hexLteUint (equal)" (hexLteUint one one)
+  assertMsg "not hexLteUint" (not (hexLteUint two one))
+
+-- ---------------------------------------------------------------------------
+-- Tests: signed comparison
+-- ---------------------------------------------------------------------------
+
+testHexCompareInt : Script ()
+testHexCompareInt = do
+  -- Positive vs positive
+  assertMsg "signed: 1 < 2" (hexCompareInt one two == LT)
+  assertMsg "signed: 2 > 1" (hexCompareInt two one == GT)
+  assertMsg "signed: 1 == 1" (hexCompareInt one one == EQ)
+  -- Negative vs positive
+  assertMsg "signed: -1 < 1" (hexCompareInt negOne one == LT)
+  assertMsg "signed: 1 > -1" (hexCompareInt one negOne == GT)
+  -- Negative vs negative
+  assertMsg "signed: -2 < -1" (hexCompareInt negTwo negOne == LT)
+  assertMsg "signed: -1 > -2" (hexCompareInt negOne negTwo == GT)
+  assertMsg "signed: -1 == -1" (hexCompareInt negOne negOne == EQ)
+  assertMsg "signed: -128 < -1" (hexCompareInt neg128 negOne == LT)
+  assertMsg "signed: -1 > -128" (hexCompareInt negOne neg128 == GT)
+  -- Min/max int256
+  assertMsg "signed: minInt256 < -1" (hexCompareInt minInt256 negOne == LT)
+  assertMsg "signed: -1 > minInt256" (hexCompareInt negOne minInt256 == GT)
+  assertMsg "signed: minInt256 < 0" (hexCompareInt minInt256 zero == LT)
+  assertMsg "signed: minInt256 == minInt256" (hexCompareInt minInt256 minInt256 == EQ)
+  assertMsg "signed: maxPosInt256 > 0" (hexCompareInt maxPosInt256 zero == GT)
+  assertMsg "signed: maxPosInt256 > -1" (hexCompareInt maxPosInt256 negOne == GT)
+  assertMsg "signed: -1 < maxPosInt256" (hexCompareInt negOne maxPosInt256 == LT)
+  -- Zero
+  assertMsg "signed: 0 < 1" (hexCompareInt zero one == LT)
+  assertMsg "signed: 0 > -1" (hexCompareInt zero negOne == GT)
+  assertMsg "signed: 0 == 0" (hexCompareInt zero zero == EQ)
+
+-- ---------------------------------------------------------------------------
+-- Tests: utilities
+-- ---------------------------------------------------------------------------
+
+testHexIsZero : Script ()
+testHexIsZero = do
+  assertMsg "zero is zero" (hexIsZero zero)
+  assertMsg "one is not zero" (not (hexIsZero one))
+  assertMsg "max is not zero" (not (hexIsZero maxVal))
+  assertMsg "short zero" (hexIsZero "0000")
+  assertMsg "mixed case zero" (hexIsZero "0000000000000000000000000000000000000000000000000000000000000000")
+
+testHexPadUint256 : Script ()
+testHexPadUint256 = do
+  assertMsg "pad ff to 64 chars" (hexPadUint256 "ff" == "00000000000000000000000000000000000000000000000000000000000000ff")
+  assertMsg "pad 03e8" (hexPadUint256 "03e8" == "00000000000000000000000000000000000000000000000000000000000003e8")
+  assertMsg "already 64 chars unchanged" (hexPadUint256 one == one)
+  assertMsg "empty string pads to 64 zeros" (hexPadUint256 "" == "0000000000000000000000000000000000000000000000000000000000000000")
+  assertMsg "single char" (hexPadUint256 "1" == "0000000000000000000000000000000000000000000000000000000000000001")
+
+-- | Test that comparison is case-insensitive.
+testHexCompareMixedCase : Script ()
+testHexCompareMixedCase = do
+  let upper = "000000000000000000000000000000000000000000000000000000000000000A"
+      lower = "000000000000000000000000000000000000000000000000000000000000000a"
+  assertMsg "mixed case EQ" (hexCompareUint upper lower == EQ)
+  assertMsg "mixed case hexEqUint" (hexEqUint upper lower)
+  -- Signed mixed case
+  let upperNeg = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE"
+      lowerNeg = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+  assertMsg "signed mixed case EQ" (hexCompareInt upperNeg lowerNeg == EQ)
+
+testHexMaxUInt256 : Script ()
+testHexMaxUInt256 = do
+  assertMsg "maxVal == maxUInt256Hex" (hexEqUint maxVal maxUInt256Hex)
+
+-- ---------------------------------------------------------------------------
+-- Tests: hexPadUint256 edge cases
+-- ---------------------------------------------------------------------------
+
+testHexPadUint256Overlong : Script ()
+testHexPadUint256Overlong = do
+  let overlong = maxVal <> "ab"  -- 66 chars
+  assertMsg "overlong result is 64 chars" (DA.Text.length (hexPadUint256 overlong) == 64)
+  assertMsg "overlong takes first 64 chars" (hexPadUint256 overlong == maxVal)
+
+testHexPadUint256Exact : Script ()
+testHexPadUint256Exact = do
+  assertMsg "exactly 64 chars unchanged" (hexPadUint256 maxVal == maxVal)
+  assertMsg "exactly 64 chars length" (DA.Text.length (hexPadUint256 maxVal) == 64)
+
+-- ---------------------------------------------------------------------------
+-- Tests: hexIsZero edge cases
+-- ---------------------------------------------------------------------------
+
+testHexIsZeroEmpty : Script ()
+testHexIsZeroEmpty = do
+  assertMsg "empty string is zero" (hexIsZero "")
+
+testHexIsZeroCaseInsensitive : Script ()
+testHexIsZeroCaseInsensitive = do
+  assertMsg "uppercase non-zero not zero" (not (hexIsZero "000000000000000000000000000000000000000000000000000000000000000A"))
+
+-- ---------------------------------------------------------------------------
+-- Tests: pad-then-compare workflow
+-- ---------------------------------------------------------------------------
+
+testHexPadThenCompare : Script ()
+testHexPadThenCompare = do
+  let padA = hexPadUint256 "ff"    -- 255
+      padB = hexPadUint256 "100"   -- 256
+  assertMsg "padded ff < padded 100" (hexCompareUint padA padB == LT)
+  assertMsg "padded 100 > padded ff" (hexCompareUint padB padA == GT)
+  let padMax = hexPadUint256 "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  assertMsg "padded max == maxVal" (hexEqUint padMax maxVal)
+  let padZero = hexPadUint256 ""
+      padOne  = hexPadUint256 "1"
+  assertMsg "padded empty < padded 1" (hexCompareUint padZero padOne == LT)
+  assertMsg "padded empty is zero" (hexIsZero padZero)

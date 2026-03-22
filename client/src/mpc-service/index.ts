@@ -1,12 +1,7 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "../config/env.js";
-import {
-  uploadDar,
-  allocateParty,
-  createUser,
-  getActiveContracts,
-} from "../infra/canton-client.js";
+import { CantonClient } from "../infra/canton-client.js";
 import { VaultOrchestrator } from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
 import { MpcServer } from "./server.js";
 
@@ -17,18 +12,19 @@ const USER_ID = "mpc-service";
 
 async function main() {
   const config = loadEnv();
+  const canton = new CantonClient(config.CANTON_JSON_API_URL);
   console.log("[MPC] Starting MPC service");
 
-  await uploadDar(DAR_PATH);
+  await canton.uploadDar(DAR_PATH);
   console.log("[MPC] DAR uploaded");
 
-  const issuer = await allocateParty("Issuer");
+  const issuer = await canton.allocateParty("Issuer");
   console.log(`[MPC] Issuer party: ${issuer}`);
 
-  await createUser(USER_ID, issuer);
+  await canton.createUser(USER_ID, issuer);
   console.log("[MPC] User created");
 
-  const contracts = await getActiveContracts([issuer], VAULT_ORCHESTRATOR);
+  const contracts = await canton.getActiveContracts([issuer], VAULT_ORCHESTRATOR);
   if (contracts.length === 0) {
     throw new Error("[MPC] No VaultOrchestrator contract found");
   }
@@ -36,6 +32,7 @@ async function main() {
   console.log(`[MPC] VaultOrchestrator CID: ${orchCid}`);
 
   const server = new MpcServer({
+    canton,
     orchCid,
     userId: USER_ID,
     parties: [issuer],

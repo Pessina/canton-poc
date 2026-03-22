@@ -1,3 +1,4 @@
+import "dotenv/config";
 import * as z from "zod";
 import { type Hex } from "viem";
 
@@ -14,9 +15,7 @@ const EnvSchema = z.object({
   MPC_ROOT_PRIVATE_KEY: hex,
   ERC20_ADDRESS: hex.default("0xB4F1737Af37711e9A5890D9510c9bB60e170CB0D" as Hex),
   FAUCET_PRIVATE_KEY: hex,
-  SEPOLIA_CHAIN_ID: z.literal(11155111),
-  CAIP2_ID: z.literal("eip155:11155111"),
-  KEY_VERSION: z.literal(1),
+  VAULT_ID: z.string().default("default-vault"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -29,8 +28,6 @@ export function loadEnv(): Env {
     MPC_ROOT_PRIVATE_KEY: process.env.MPC_ROOT_PRIVATE_KEY,
     ERC20_ADDRESS: process.env.ERC20_ADDRESS,
     FAUCET_PRIVATE_KEY: process.env.FAUCET_PRIVATE_KEY ?? process.env.MPC_ROOT_PRIVATE_KEY,
-    SEPOLIA_CHAIN_ID: 11155111,
-    CAIP2_ID: "eip155:11155111",
-    KEY_VERSION: 1,
+    VAULT_ID: process.env.VAULT_ID,
   });
 }

@@ -9,11 +9,12 @@
  */
 
 import WebSocket from "ws";
-import { BASE_URL, getUpdates, type JsGetUpdatesResponse } from "./canton-client.js";
+import type { CantonClient } from "./canton-client.js";
+import type { JsGetUpdatesResponse } from "./canton-client.js";
 
 interface LedgerStreamOptions {
-  /** Base URL of the Canton JSON Ledger API (e.g. "http://localhost:7575") */
-  baseUrl?: string;
+  /** Canton client instance used for the WebSocket base URL and HTTP polling fallback */
+  canton: CantonClient;
   /** Parties to filter updates for */
   parties: string[];
   /** Offset to start streaming from (exclusive) */
@@ -41,7 +42,7 @@ export interface StreamHandle {
 }
 
 export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
-  const baseUrl = opts.baseUrl ?? BASE_URL;
+  const baseUrl = opts.canton.baseUrl;
   const maxDelay = opts.maxReconnectDelayMs ?? 10_000;
   const maxAttempts = opts.maxReconnectAttempts ?? 10;
   const pollingIdleTimeoutMs = opts.pollingIdleTimeoutMs ?? 2000;
@@ -170,7 +171,11 @@ export function createLedgerStream(opts: LedgerStreamOptions): StreamHandle {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- closed is set by close() during async execution
     while (!closed) {
       try {
-        const updates = await getUpdates(currentOffset, opts.parties, pollingIdleTimeoutMs);
+        const updates = await opts.canton.getUpdates(
+          currentOffset,
+          opts.parties,
+          pollingIdleTimeoutMs,
+        );
         for (const item of updates) {
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- closed is set by close() during async execution
           if (closed) break;

@@ -1,0 +1,80 @@
+module TestFixtures where
+
+import DA.Crypto.Text (BytesHex)
+import Types (EvmTransactionParams(..))
+
+-- ---------------------------------------------------------------------------
+-- Shared test keys and signatures
+-- ---------------------------------------------------------------------------
+
+testPubKeyHex : Text
+testPubKeyHex = "3056301006072a8648ce3d020106052b8104000a034200049b51a3db8f697ac5e49078b01af8d2721dd9a39b81c59bae57d13e5c5d4c915649441be47149b0293b28d8b4a92416045bb39f922329f197fdeed3320c0746a5"
+
+testMessageHex : Text
+testMessageHex = "1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8"
+
+testSignatureHex : Text
+testSignatureHex = "304602210093dffbc917a44aa1dd115ad85c5ddcfcda753490664a04802ac55028cea65b88022100acf58d3b62940b844872c1a156fc797499f823d9144ec2d05d21c71f901a3a3e"
+
+-- SPKI-encoded secp256k1 public key matching the TS test private key
+claimTestPubKey : Text
+claimTestPubKey = "3056301006072a8648ce3d020106052b8104000a03420004bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020decddbf6e00192011648d13b1c00af770c0c1bb609d4d3a5c98a43772e0e18ef4"
+
+-- DER signature over computeResponseHash(claimTestRequestId, "01")
+claimTestSignature : Text
+claimTestSignature = "3045022100bdf1263e14358fa90f636b570e067988cd98e70666b58b57ad2b37242500e9fe022050699bef9115090a147a479ab5baa28b7600e8079cfb93d627d90d0d542b1b05"
+
+claimTestRequestId : Text
+claimTestRequestId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+-- DER signature over computeResponseHash(claimTestRequestId, "00") — refund case
+refundTestSignature : Text
+refundTestSignature = "30440220546eccb3146e40f8ba11b8df383bcf2e3367378c403d2375531b9a4702c30ae60220718bec44f9ef88d4ca28ed189a50ddf7de12afb66ee85bda37f50f54aa68d96d"
+
+-- ---------------------------------------------------------------------------
+-- Shared EVM params
+-- ---------------------------------------------------------------------------
+
+sampleVaultAddress : BytesHex
+sampleVaultAddress = "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045"
+
+sampleEvmParams : EvmTransactionParams
+sampleEvmParams = EvmTransactionParams with
+  to = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+  functionSignature = "transfer(address,uint256)"
+  args = [ sampleVaultAddress
+         , "0000000000000000000000000000000000000000000000000000000005f5e100"
+         ]
+  value = "0000000000000000000000000000000000000000000000000000000000000000"
+  nonce = "0000000000000000000000000000000000000000000000000000000000000001"
+  gasLimit = "000000000000000000000000000000000000000000000000000000000000c350"
+  maxFeePerGas = "00000000000000000000000000000000000000000000000000000001dcd65000"
+  maxPriorityFee = "000000000000000000000000000000000000000000000000000000003b9aca00"
+  chainId = "0000000000000000000000000000000000000000000000000000000000aa36a7"
+
+-- ---------------------------------------------------------------------------
+-- Withdrawal test data
+-- ---------------------------------------------------------------------------
+
+sampleRecipientAddress : BytesHex
+sampleRecipientAddress = "0000000000000000000000001111111111111111111111111111111111111111"
+
+sampleErc20Address : BytesHex
+sampleErc20Address = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+
+sampleHoldingAmount : BytesHex
+sampleHoldingAmount = "0000000000000000000000000000000000000000000000000000000005f5e100"
+
+sampleWithdrawalEvmParams : EvmTransactionParams
+sampleWithdrawalEvmParams = EvmTransactionParams with
+  to = sampleErc20Address
+  functionSignature = "transfer(address,uint256)"
+  args = [ sampleRecipientAddress
+         , sampleHoldingAmount
+         ]
+  value = "0000000000000000000000000000000000000000000000000000000000000000"
+  nonce = "0000000000000000000000000000000000000000000000000000000000000001"
+  gasLimit = "000000000000000000000000000000000000000000000000000000000000c350"
+  maxFeePerGas = "00000000000000000000000000000000000000000000000000000001dcd65000"
+  maxPriorityFee = "000000000000000000000000000000000000000000000000000000003b9aca00"
+  chainId = "0000000000000000000000000000000000000000000000000000000000aa36a7"

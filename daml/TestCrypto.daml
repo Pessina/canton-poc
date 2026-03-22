@@ -1,0 +1,79 @@
+module TestCrypto where
+
+import DA.Optional (fromSome)
+import DA.Crypto.Text (keccak256, secp256k1WithEcdsaOnly, packHexBytes, byteCount, toHex, fromHex)
+import Daml.Script
+
+import Crypto (chainIdToDecimalText)
+import TestFixtures (testPubKeyHex, testMessageHex, testSignatureHex)
+
+------------------------------------------------------------------------
+-- keccak256 known vector
+------------------------------------------------------------------------
+
+testKeccak256KnownVector : Script ()
+testKeccak256KnownVector = do
+  let input    = "68656c6c6f"
+  let expected = "1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8"
+  let result   = keccak256 input
+  assertMsg ("keccak256 mismatch: got " <> result) (result == expected)
+
+------------------------------------------------------------------------
+-- padLeft / hex packing
+------------------------------------------------------------------------
+
+testHexPacking : Script ()
+testHexPacking = do
+  let packed = fromSome (packHexBytes "ff" 32)
+  assertMsg "packed uint256 must be 32 bytes" (byteCount packed == 32)
+  assertMsg "must be left-padded" (packed == "00000000000000000000000000000000000000000000000000000000000000ff")
+
+  let addr = "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+  let packedAddr = fromSome (packHexBytes addr 20)
+  assertMsg "20-byte address unchanged" (packedAddr == addr)
+
+  let long = "0000000000000000000000001234567890abcdef1234567890abcdef12345678"
+  let truncated = fromSome (packHexBytes long 20)
+  assertMsg "truncation keeps rightmost bytes" (byteCount truncated == 20)
+
+------------------------------------------------------------------------
+-- secp256k1 signature verification
+------------------------------------------------------------------------
+
+testSecp256k1Verification : Script ()
+testSecp256k1Verification = do
+  let valid = secp256k1WithEcdsaOnly testSignatureHex testMessageHex testPubKeyHex
+  assertMsg "Valid signature must verify" valid
+
+  let wrongMsg = keccak256 "deadbeef"
+  let invalid = secp256k1WithEcdsaOnly testSignatureHex wrongMsg testPubKeyHex
+  assertMsg "Wrong message must fail verification" (not invalid)
+
+------------------------------------------------------------------------
+-- chainIdToDecimalText
+------------------------------------------------------------------------
+
+testChainIdToDecimalText : Script ()
+testChainIdToDecimalText = do
+  assertMsg "aa36a7 -> 11155111" (chainIdToDecimalText "aa36a7" == "11155111")
+  assertMsg "01 -> 1" (chainIdToDecimalText "01" == "1")
+  assertMsg "padded -> 11155111"
+    (chainIdToDecimalText "0000000000000000000000000000000000000000000000000000000000aa36a7" == "11155111")
+  assertMsg "single 1 -> 1" (chainIdToDecimalText "1" == "1")
+
+------------------------------------------------------------------------
+-- toHex / fromHex round-trips
+------------------------------------------------------------------------
+
+testBuiltinHexRoundTrips : Script ()
+testBuiltinHexRoundTrips = do
+  assertMsg "toHex ECDSA" (toHex "ECDSA" == "4543445341")
+  assertMsg "toHex ethereum" (toHex "ethereum" == "657468657265756d")
+  assertMsg "toHex Int 1" (toHex (1 : Int) == "0000000000000001")
+  assertMsg "toHex Int 255" (toHex (255 : Int) == "00000000000000ff")
+
+  let decoded : Optional Int = fromHex "aa36a7"
+  assertMsg "fromHex aa36a7" (decoded == Some 11155111)
+
+  assertMsg "uint32 via packHexBytes"
+    (fromSome (packHexBytes (toHex (1 : Int)) 4) == "00000001")

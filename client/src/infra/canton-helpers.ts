@@ -19,9 +19,3 @@ export function firstCreated(events: Event[] | undefined): CreatedEvent {
   if (!created) throw new Error("First event is not a CreatedEvent");
   return created;
 }
-
-export function packageIdFromTemplateId(templateId: string): string {
-  const packageId = templateId.split(":")[0];
-  if (!packageId) throw new Error(`Invalid templateId: ${templateId}`);
-  return packageId;
-}

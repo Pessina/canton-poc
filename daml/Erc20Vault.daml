@@ -5,7 +5,8 @@ import DA.List ((!!)  )
 import DA.Crypto.Text (BytesHex, PublicKeyHex, SignatureHex, secp256k1WithEcdsaOnly)
 
 import Types (EvmTransactionParams)
-import Crypto (computeRequestId, computeResponseHash, chainIdToDecimalText)
+import Crypto (chainIdToDecimalText)
+import RequestId (computeRequestId, computeResponseHash)
 
 template DepositAuthProposal
   with
@@ -35,19 +36,25 @@ template Erc20Holding
     signatory issuer
     observer owner
 
-template PendingEvmDeposit
+data TxSource
+  = DepositSource (ContractId DepositAuthorization)
+  | WithdrawalSource (ContractId Erc20Holding)
+  deriving (Eq, Show)
+
+template PendingEvmTx
   with
-    issuer         : Party
-    requester      : Party
-    mpc            : Party
-    requestId      : BytesHex
-    path           : Text
-    evmParams      : EvmTransactionParams
-    authCidText    : Text         -- user-supplied, DepositAuthorization contractId as text (nonce for requestId)
-    authCid        : ContractId DepositAuthorization  -- injected by VaultOrchestrator, verified
-    keyVersion     : Int
-    algo           : Text
-    dest           : Text
+    issuer       : Party
+    requester    : Party
+    mpc          : Party
+    requestId    : BytesHex
+    path         : Text
+    evmParams    : EvmTransactionParams
+    vaultId      : Text           -- issuer-controlled discriminator for MPC key derivation (from VaultOrchestrator)
+    nonceCidText : Text           -- user-supplied, source contractId as text (nonce for requestId)
+    source       : TxSource       -- DepositSource authCid | WithdrawalSource balanceCid
+    keyVersion   : Int
+    algo         : Text
+    dest         : Text
   where
     signatory issuer
     observer mpc, requester
@@ -81,6 +88,7 @@ template VaultOrchestrator
     mpc          : Party
     mpcPublicKey : PublicKeyHex
     vaultAddress : BytesHex
+    vaultId      : Text           -- issuer-controlled discriminator for MPC key derivation
   where
     signatory issuer
     observer mpc
@@ -109,7 +117,7 @@ template VaultOrchestrator
           owner = proposal.owner
           remainingUses
 
-    nonconsuming choice RequestEvmDeposit : ContractId PendingEvmDeposit
+    nonconsuming choice RequestEvmDeposit : ContractId PendingEvmTx
       with
         requester      : Party
         path           : Text
@@ -142,9 +150,10 @@ template VaultOrchestrator
         let fullPath = sender <> "," <> path
         let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
         let requestId = computeRequestId sender evmParams caip2Id keyVersion fullPath algo dest authCidText
-        create PendingEvmDeposit with
+        create PendingEvmTx with
           issuer; requester; mpc; requestId; path = fullPath; evmParams
-          authCidText; authCid; keyVersion; algo; dest
+          vaultId; nonceCidText = authCidText; source = DepositSource authCid
+          keyVersion; algo; dest
 
     nonconsuming choice SignEvmTx : ContractId EcdsaSignature
       with
@@ -172,7 +181,7 @@ template VaultOrchestrator
     nonconsuming choice ClaimEvmDeposit : ContractId Erc20Holding
       with
         requester   : Party
-        pendingCid  : ContractId PendingEvmDeposit
+        pendingCid  : ContractId PendingEvmTx
         outcomeCid  : ContractId EvmTxOutcomeSignature
         ecdsaCid    : ContractId EcdsaSignature
       controller requester
@@ -180,6 +189,10 @@ template VaultOrchestrator
         pending <- fetch pendingCid
         outcome <- fetch outcomeCid
         ecdsa   <- fetch ecdsaCid
+
+        case pending.source of
+          DepositSource _ -> pure ()
+          _ -> abort "PendingEvmTx is not a deposit"
 
         assertMsg "Pending issuer mismatch"
           (pending.issuer == issuer)
@@ -209,3 +222,90 @@ template VaultOrchestrator
           owner = pending.requester
           erc20Address = (pending.evmParams).to
           amount
+
+    nonconsuming choice RequestEvmWithdrawal : ContractId PendingEvmTx
+      with
+        requester        : Party
+        evmParams        : EvmTransactionParams
+        recipientAddress : BytesHex
+        balanceCidText   : Text
+        keyVersion       : Int
+        algo             : Text
+        dest             : Text
+        balanceCid       : ContractId Erc20Holding
+      controller requester
+      do
+        holding <- fetch balanceCid
+        assertMsg "Holding issuer mismatch" (holding.issuer == issuer)
+        assertMsg "Holding owner mismatch" (holding.owner == requester)
+
+        let recipientArg = case evmParams.args of
+              recipient :: _ -> recipient
+              [] -> ""
+        let amountArg = evmParams.args !! 1
+
+        assertMsg "Only ERC20 transfer allowed"
+          (evmParams.functionSignature == "transfer(address,uint256)")
+        assertMsg "ERC20 contract must match holding"
+          (evmParams.to == holding.erc20Address)
+        assertMsg "Transfer recipient must match specified address"
+          (recipientArg == recipientAddress)
+        assertMsg "Withdraw amount must match holding (full withdrawal)"
+          (amountArg == holding.amount)
+
+        archive balanceCid
+
+        let sender = partyToText requester
+        let fullPath = "root"
+        let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
+        let requestId = computeRequestId sender evmParams caip2Id keyVersion fullPath algo dest balanceCidText
+        create PendingEvmTx with
+          issuer; requester; mpc; requestId; path = fullPath; evmParams
+          vaultId; nonceCidText = balanceCidText; source = WithdrawalSource balanceCid
+          keyVersion; algo; dest
+
+    nonconsuming choice CompleteEvmWithdrawal : Optional (ContractId Erc20Holding)
+      with
+        requester   : Party
+        pendingCid  : ContractId PendingEvmTx
+        outcomeCid  : ContractId EvmTxOutcomeSignature
+        ecdsaCid    : ContractId EcdsaSignature
+      controller requester
+      do
+        pending <- fetch pendingCid
+        outcome <- fetch outcomeCid
+        ecdsa   <- fetch ecdsaCid
+
+        case pending.source of
+          WithdrawalSource _ -> pure ()
+          _ -> abort "PendingEvmTx is not a withdrawal"
+
+        assertMsg "Pending issuer mismatch"
+          (pending.issuer == issuer)
+        assertMsg "Outcome issuer mismatch"
+          (outcome.issuer == issuer)
+
+        assertMsg "Requester mismatch"
+          (pending.requester == requester)
+
+        assertMsg "Request ID mismatch"
+          (pending.requestId == outcome.requestId)
+
+        let responseHash = computeResponseHash pending.requestId outcome.mpcOutput
+        assertMsg "Invalid MPC signature on withdrawal response"
+          (secp256k1WithEcdsaOnly outcome.signature responseHash mpcPublicKey)
+
+        archive pendingCid
+        archive outcomeCid
+        archive ecdsaCid
+
+        if outcome.mpcOutput == "01"
+          then return None
+          else do
+            let amount = (pending.evmParams).args !! 1
+            refundCid <- create Erc20Holding with
+              issuer
+              owner = pending.requester
+              erc20Address = (pending.evmParams).to
+              amount
+            return (Some refundCid)
