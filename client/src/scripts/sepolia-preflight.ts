@@ -17,7 +17,7 @@ import { createPublicClient, http, parseAbi } from "viem";
 import { sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { loadEnv } from "../config/env.js";
-import { uploadDar, allocateParty } from "../infra/canton-client.js";
+import { CantonClient } from "../infra/canton-client.js";
 import { deriveDepositAddress } from "../mpc/address-derivation.js";
 import { DEPOSIT_AMOUNT } from "../test/helpers/sepolia-helpers.js";
 
@@ -25,13 +25,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
 
 const env = loadEnv();
+const canton = new CantonClient(env.CANTON_JSON_API_URL);
 
 async function main() {
   console.log("── Sepolia E2E Pre-flight ──\n");
 
-  await uploadDar(DAR_PATH);
-  const issuer = await allocateParty("Issuer");
-  const requester = await allocateParty("SepoliaRequester");
+  await canton.uploadDar(DAR_PATH);
+  const issuer = await canton.allocateParty("Issuer");
+  const requester = await canton.allocateParty("SepoliaRequester");
   console.log(`Canton issuer party:    ${issuer}`);
   console.log(`Canton requester party: ${requester}`);
 

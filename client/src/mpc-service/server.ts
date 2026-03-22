@@ -1,7 +1,6 @@
 import type { Hex } from "viem";
 import {
-  getActiveContracts,
-  getLedgerEnd,
+  CantonClient,
   type CreatedEvent,
   type JsGetUpdatesResponse,
 } from "../infra/canton-client.js";
@@ -25,6 +24,7 @@ function templateSuffix(templateId: string): string {
 const PENDING_TX_SUFFIX = templateSuffix(PendingEvmTx.templateId);
 
 export interface MpcServerConfig {
+  canton: CantonClient;
   orchCid: string;
   userId: string;
   parties: string[];
@@ -47,6 +47,7 @@ export class MpcServer {
       this.resolveReady = resolve;
     });
     this.serviceConfig = {
+      canton: config.canton,
       orchCid: config.orchCid,
       userId: config.userId,
       actAs: config.parties,
@@ -74,7 +75,10 @@ export class MpcServer {
   private async catchUp(): Promise<void> {
     console.log("[MPC] Catching up on active PendingEvmTx contracts...");
     try {
-      const txs = await getActiveContracts(this.config.parties, PendingEvmTx.templateId);
+      const txs = await this.config.canton.getActiveContracts(
+        this.config.parties,
+        PendingEvmTx.templateId,
+      );
       for (const c of txs) this.dispatch(c);
       console.log(`[MPC] Catch-up complete (${txs.length} pending txs)`);
     } catch (err) {
@@ -118,9 +122,10 @@ export class MpcServer {
   }
 
   async start(): Promise<void> {
-    const offset = await getLedgerEnd();
+    const offset = await this.config.canton.getLedgerEnd();
 
     this.stream = createLedgerStream({
+      canton: this.config.canton,
       parties: this.config.parties,
       beginExclusive: offset,
       maxReconnectAttempts: 2,

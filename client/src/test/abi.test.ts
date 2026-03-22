@@ -167,13 +167,11 @@ const VECTORS = {
 
   // --- New vectors: full-range uint values ---
   uint256_max: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-  uint128_large:
-    "0x0000000000000000000000000000000080000000000000000000000000000001",
+  uint128_large: "0x0000000000000000000000000000000080000000000000000000000000000001",
 
   // --- New vectors: boundary cases and additional coverage ---
   address_zero: "0x0000000000000000000000000000000000000000000000000000000000000000",
-  bytes16:
-    "0xdeadbeefdeadbeefdeadbeefdeadbeef00000000000000000000000000000000",
+  bytes16: "0xdeadbeefdeadbeefdeadbeefdeadbeef00000000000000000000000000000000",
   bytes_dynamic_32:
     "0x" +
     "0000000000000000000000000000000000000000000000000000000000000020" +
@@ -198,10 +196,8 @@ const VECTORS = {
     "0000000000000000000000000000000000000000000000000000000000000001" +
     "0000000000000000000000000000000000000000000000000000000000000005" +
     "48656c6c6f000000000000000000000000000000000000000000000000000000",
-  int256_min:
-    "0x8000000000000000000000000000000000000000000000000000000000000000",
-  int256_max_pos:
-    "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  int256_min: "0x8000000000000000000000000000000000000000000000000000000000000000",
+  int256_max_pos: "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
   bytes_empty:
     "0x" +
     "0000000000000000000000000000000000000000000000000000000000000020" +
@@ -442,14 +438,12 @@ describe("ABI encoding vectors (cross-language ground truth)", () => {
 
   // --- New: full-range uint values ---
   it("uint256(max) = 2^256-1", () => {
-    expect(
-      encodeAbiParameters([{ type: "uint256" }], [2n ** 256n - 1n]),
-    ).toBe(VECTORS.uint256_max);
+    expect(encodeAbiParameters([{ type: "uint256" }], [2n ** 256n - 1n])).toBe(VECTORS.uint256_max);
   });
   it("uint128(2^127 + 1) — exceeds Int64 range", () => {
-    expect(
-      encodeAbiParameters([{ type: "uint256" }], [2n ** 127n + 1n]),
-    ).toBe(VECTORS.uint128_large);
+    expect(encodeAbiParameters([{ type: "uint256" }], [2n ** 127n + 1n])).toBe(
+      VECTORS.uint128_large,
+    );
   });
 
   // --- New: boundary cases and additional coverage (viem-verified) ---
@@ -459,9 +453,9 @@ describe("ABI encoding vectors (cross-language ground truth)", () => {
     ).toBe(VECTORS.address_zero);
   });
   it("bytes16", () => {
-    expect(
-      encodeAbiParameters([{ type: "bytes16" }], ["0xdeadbeefdeadbeefdeadbeefdeadbeef"]),
-    ).toBe(VECTORS.bytes16);
+    expect(encodeAbiParameters([{ type: "bytes16" }], ["0xdeadbeefdeadbeefdeadbeefdeadbeef"])).toBe(
+      VECTORS.bytes16,
+    );
   });
   it("bytes — exactly 32 bytes payload", () => {
     expect(
@@ -480,9 +474,9 @@ describe("ABI encoding vectors (cross-language ground truth)", () => {
     ).toBe(VECTORS.bytes_dynamic_33);
   });
   it("string — 33 chars (crosses word boundary)", () => {
-    expect(
-      encodeAbiParameters([{ type: "string" }], ["ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567"]),
-    ).toBe(VECTORS.string_33bytes);
+    expect(encodeAbiParameters([{ type: "string" }], ["ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567"])).toBe(
+      VECTORS.string_33bytes,
+    );
   });
   it("(string, uint256, bool) = ('Hello', 99, true) — dynamic at index 0", () => {
     expect(
@@ -493,14 +487,12 @@ describe("ABI encoding vectors (cross-language ground truth)", () => {
     ).toBe(VECTORS.dynamic_tuple_str_first);
   });
   it("int256(-2^255) — min int256", () => {
-    expect(
-      encodeAbiParameters([{ type: "int256" }], [-(2n ** 255n)]),
-    ).toBe(VECTORS.int256_min);
+    expect(encodeAbiParameters([{ type: "int256" }], [-(2n ** 255n)])).toBe(VECTORS.int256_min);
   });
   it("int256(2^255 - 1) — max positive int256", () => {
-    expect(
-      encodeAbiParameters([{ type: "int256" }], [2n ** 255n - 1n]),
-    ).toBe(VECTORS.int256_max_pos);
+    expect(encodeAbiParameters([{ type: "int256" }], [2n ** 255n - 1n])).toBe(
+      VECTORS.int256_max_pos,
+    );
   });
   it("bytes — empty payload", () => {
     expect(encodeAbiParameters([{ type: "bytes" }], ["0x"])).toBe(VECTORS.bytes_empty);

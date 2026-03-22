@@ -2,17 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Hex } from "viem";
-import {
-  allocateParty,
-  createContract,
-  createUser,
-  exerciseChoice,
-  getActiveContracts,
-  getDisclosedContract,
-  uploadDar,
-  type CreatedEvent,
-  type DisclosedContract,
-} from "../infra/canton-client.js";
+import { CantonClient, type CreatedEvent, type DisclosedContract } from "../infra/canton-client.js";
 import { findCreated, firstCreated } from "../infra/canton-helpers.js";
 import {
   VaultOrchestrator,
@@ -27,6 +17,7 @@ import { deriveDepositAddress } from "../mpc/address-derivation.js";
 import { signMpcResponse } from "../mpc-service/signer.js";
 import { loadEnv } from "../config/env.js";
 
+const canton = new CantonClient();
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
 
@@ -77,7 +68,7 @@ async function assertVisibility(
   notVisible: string[],
 ) {
   const checks = [...visible, ...notVisible].map(async (party) => {
-    const contracts = await getActiveContracts([party], templateId);
+    const contracts = await canton.getActiveContracts([party], templateId);
     return { party, found: hasContract(contracts, contractId) };
   });
   const results = await Promise.all(checks);
@@ -102,19 +93,19 @@ describe("ledger visibility + permission model", () => {
   let vaultAddress: Hex;
 
   beforeAll(async () => {
-    await uploadDar(DAR_PATH);
+    await canton.uploadDar(DAR_PATH);
 
-    issuer = await allocateParty(`IssuerPerm_${RUN_ID}`);
-    requester = await allocateParty(`RequesterPerm_${RUN_ID}`);
-    mpc = await allocateParty(`MpcPerm_${RUN_ID}`);
+    issuer = await canton.allocateParty(`IssuerPerm_${RUN_ID}`);
+    requester = await canton.allocateParty(`RequesterPerm_${RUN_ID}`);
+    mpc = await canton.allocateParty(`MpcPerm_${RUN_ID}`);
 
-    await createUser(ISSUER_USER, issuer);
-    await createUser(REQUESTER_USER, requester);
+    await canton.createUser(ISSUER_USER, issuer);
+    await canton.createUser(REQUESTER_USER, requester);
 
     const { VAULT_ID } = loadEnv();
     vaultAddress = deriveDepositAddress(MPC_ROOT_PUBLIC_KEY, `${VAULT_ID}${issuer}`, "root");
 
-    const orchResult = await createContract(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, {
+    const orchResult = await canton.createContract(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, {
       issuer,
       mpc,
       mpcPublicKey: MPC_PUB_KEY_SPKI,
@@ -124,13 +115,13 @@ describe("ledger visibility + permission model", () => {
     orchCid = firstCreated(orchResult.transaction.events).contractId;
 
     // Issuer fetches the createdEventBlob and shares it off-chain with requesters
-    orchDisclosure = await getDisclosedContract([issuer], VAULT_ORCHESTRATOR, orchCid);
+    orchDisclosure = await canton.getDisclosedContract([issuer], VAULT_ORCHESTRATOR, orchCid);
   }, 40_000);
 
   it("disclosure grants visibility without authorization", async () => {
     // Without disclosure, requester has no visibility into VaultOrchestrator
     await expect(
-      exerciseChoice(
+      canton.exerciseChoice(
         REQUESTER_USER,
         [requester],
         VAULT_ORCHESTRATOR,
@@ -141,7 +132,7 @@ describe("ledger visibility + permission model", () => {
     ).rejects.toThrow();
 
     // With disclosed blob, requester can exercise requester-controlled choices
-    const requestResult = await exerciseChoice(
+    const requestResult = await canton.exerciseChoice(
       REQUESTER_USER,
       [requester],
       VAULT_ORCHESTRATOR,
@@ -158,7 +149,7 @@ describe("ledger visibility + permission model", () => {
 
     // Disclosure does NOT grant authorization — requester cannot exercise issuer-controlled choices
     await expect(
-      exerciseChoice(
+      canton.exerciseChoice(
         REQUESTER_USER,
         [requester],
         VAULT_ORCHESTRATOR,
@@ -171,10 +162,17 @@ describe("ledger visibility + permission model", () => {
     ).rejects.toThrow();
 
     // Issuer approves (signatory, no disclosure needed)
-    await exerciseChoice(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, orchCid, "ApproveDepositAuth", {
-      proposalCid: proposal.contractId,
-      remainingUses: 1,
-    });
+    await canton.exerciseChoice(
+      ISSUER_USER,
+      [issuer],
+      VAULT_ORCHESTRATOR,
+      orchCid,
+      "ApproveDepositAuth",
+      {
+        proposalCid: proposal.contractId,
+        remainingUses: 1,
+      },
+    );
   });
 
   it("full lifecycle: controller permissions and observer visibility", async () => {
@@ -182,7 +180,7 @@ describe("ledger visibility + permission model", () => {
     await assertVisibility(VAULT_ORCHESTRATOR, orchCid, [issuer, mpc], [requester]);
 
     // -- Step 1: RequestDepositAuth (controller=requester)
-    const proposalResult = await exerciseChoice(
+    const proposalResult = await canton.exerciseChoice(
       REQUESTER_USER,
       [requester],
       VAULT_ORCHESTRATOR,
@@ -201,7 +199,7 @@ describe("ledger visibility + permission model", () => {
     await assertVisibility(DEPOSIT_AUTH_PROPOSAL, proposalCid, [issuer, requester], [mpc]);
 
     // -- Step 2: ApproveDepositAuth (controller=issuer)
-    const approveResult = await exerciseChoice(
+    const approveResult = await canton.exerciseChoice(
       ISSUER_USER,
       [issuer],
       VAULT_ORCHESTRATOR,
@@ -219,7 +217,7 @@ describe("ledger visibility + permission model", () => {
 
     // -- Step 4: RequestEvmDeposit (controller=requester)
     const evmParams = buildSampleEvmParams(vaultAddress);
-    const pendingResult = await exerciseChoice(
+    const pendingResult = await canton.exerciseChoice(
       REQUESTER_USER,
       [requester],
       VAULT_ORCHESTRATOR,
@@ -248,7 +246,7 @@ describe("ledger visibility + permission model", () => {
     // -- Step 7: SignEvmTx (controller=issuer)
     // Requester cannot exercise issuer-controlled choices
     await expect(
-      exerciseChoice(
+      canton.exerciseChoice(
         REQUESTER_USER,
         [requester],
         VAULT_ORCHESTRATOR,
@@ -260,7 +258,7 @@ describe("ledger visibility + permission model", () => {
       ),
     ).rejects.toThrow();
 
-    const signResult = await exerciseChoice(
+    const signResult = await canton.exerciseChoice(
       ISSUER_USER,
       [issuer],
       VAULT_ORCHESTRATOR,
@@ -275,7 +273,7 @@ describe("ledger visibility + permission model", () => {
 
     // -- Step 10: ProvideEvmOutcomeSig (controller=issuer)
     await expect(
-      exerciseChoice(
+      canton.exerciseChoice(
         REQUESTER_USER,
         [requester],
         VAULT_ORCHESTRATOR,
@@ -289,7 +287,7 @@ describe("ledger visibility + permission model", () => {
 
     const mpcOutput = "01";
     const mpcSignature = signMpcResponse(MPC_ROOT_PRIVATE_KEY, requestId, mpcOutput);
-    const outcomeResult = await exerciseChoice(
+    const outcomeResult = await canton.exerciseChoice(
       ISSUER_USER,
       [issuer],
       VAULT_ORCHESTRATOR,
@@ -308,7 +306,7 @@ describe("ledger visibility + permission model", () => {
     // -- Step 11: ClaimEvmDeposit (controller=requester)
     // Issuer cannot claim (controller is requester, not issuer)
     await expect(
-      exerciseChoice(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, orchCid, "ClaimEvmDeposit", {
+      canton.exerciseChoice(ISSUER_USER, [issuer], VAULT_ORCHESTRATOR, orchCid, "ClaimEvmDeposit", {
         requester,
         pendingCid,
         outcomeCid,
@@ -317,7 +315,7 @@ describe("ledger visibility + permission model", () => {
     ).rejects.toThrow();
 
     // Requester claims via disclosure
-    const claimResult = await exerciseChoice(
+    const claimResult = await canton.exerciseChoice(
       REQUESTER_USER,
       [requester],
       VAULT_ORCHESTRATOR,
@@ -336,11 +334,11 @@ describe("ledger visibility + permission model", () => {
     await assertVisibility(ERC20_HOLDING, holding.contractId, [issuer, requester], [mpc]);
 
     // Evidence contracts must be archived after claim
-    const remainingPending = await getActiveContracts([issuer], PENDING_EVM_TX);
+    const remainingPending = await canton.getActiveContracts([issuer], PENDING_EVM_TX);
     expect(hasContract(remainingPending, pendingCid)).toBe(false);
-    const remainingEcdsa = await getActiveContracts([issuer], ECDSA_SIGNATURE);
+    const remainingEcdsa = await canton.getActiveContracts([issuer], ECDSA_SIGNATURE);
     expect(hasContract(remainingEcdsa, ecdsaCid)).toBe(false);
-    const remainingOutcome = await getActiveContracts([issuer], EVM_TX_OUTCOME_SIG);
+    const remainingOutcome = await canton.getActiveContracts([issuer], EVM_TX_OUTCOME_SIG);
     expect(hasContract(remainingOutcome, outcomeCid)).toBe(false);
   }, 60_000);
 });

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAddress, privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import { exerciseChoice, getActiveContracts } from "../infra/canton-client.js";
 import { findCreated } from "../infra/canton-helpers.js";
 import { chainIdHexToCaip2 } from "../mpc/address-derivation.js";
 import { computeRequestId } from "../mpc/crypto.js";
@@ -98,7 +97,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     // ── Request withdrawal ──
     console.log("[wdl-e2e] User → Canton: RequestEvmWithdrawal");
-    const wdlResult = await exerciseChoice(
+    const wdlResult = await setup.canton.exerciseChoice(
       setup.userId,
       [setup.requester],
       VAULT_ORCHESTRATOR,
@@ -170,7 +169,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
     console.log("[wdl-e2e] EvmTxOutcomeSignature observed");
 
     // ── User completes withdrawal on Canton ──
-    await exerciseChoice(
+    await setup.canton.exerciseChoice(
       setup.userId,
       [setup.requester],
       VAULT_ORCHESTRATOR,
@@ -188,7 +187,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     // CompleteEvmWithdrawal succeeded (no throw).
     // On success (mpcOutput=="01"): returns None — no refund Erc20Holding created.
-    const holdings = await getActiveContracts(
+    const holdings = await setup.canton.getActiveContracts(
       [setup.issuer, setup.requester],
       ERC20_HOLDING,
     );
@@ -251,7 +250,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     // ── Request withdrawal ──
     console.log("[wdl-nonce] User → Canton: RequestEvmWithdrawal");
-    const wdlResult = await exerciseChoice(
+    const wdlResult = await setup.canton.exerciseChoice(
       setup.userId,
       [setup.requester],
       VAULT_ORCHESTRATOR,
@@ -293,7 +292,10 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
       "root",
     );
     const vaultAccount = privateKeyToAccount(vaultChildKey);
-    const publicClient = createPublicClient({ chain: sepolia, transport: http(env!.SEPOLIA_RPC_URL) });
+    const publicClient = createPublicClient({
+      chain: sepolia,
+      transport: http(env!.SEPOLIA_RPC_URL),
+    });
     const walletClient = createWalletClient({
       account: vaultAccount,
       chain: sepolia,
@@ -322,7 +324,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
     console.log("[wdl-nonce] EvmTxOutcomeSignature observed (mpcOutput=00)");
 
     // ── Complete withdrawal → refund ──
-    const completeResult = await exerciseChoice(
+    const completeResult = await setup.canton.exerciseChoice(
       setup.userId,
       [setup.requester],
       VAULT_ORCHESTRATOR,

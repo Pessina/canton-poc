@@ -4,7 +4,7 @@ import { sepolia } from "viem/chains";
 import { serializeUnsignedTx, reconstructSignedTx } from "../evm/tx-builder.js";
 import { deriveChildPrivateKey, signEvmTxHash, signMpcResponse } from "./signer.js";
 import {
-  exerciseChoice,
+  CantonClient,
   type CreatedEvent,
   type TransactionResponse,
 } from "../infra/canton-client.js";
@@ -26,6 +26,7 @@ const ERC20_TRANSFER_TOPIC = keccak256(
 // ---------------------------------------------------------------------------
 
 export interface MpcServiceConfig {
+  canton: CantonClient;
   orchCid: string;
   userId: string;
   actAs: string[];
@@ -69,6 +70,7 @@ function isTransientError(error: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 async function exerciseChoiceWithRetry(
+  canton: CantonClient,
   userId: string,
   actAs: string[],
   templateId: string,
@@ -79,7 +81,14 @@ async function exerciseChoiceWithRetry(
 ): Promise<TransactionResponse> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await exerciseChoice(userId, actAs, templateId, contractId, choice, choiceArgument);
+      return await canton.exerciseChoice(
+        userId,
+        actAs,
+        templateId,
+        contractId,
+        choice,
+        choiceArgument,
+      );
     } catch (err) {
       if (!isTransientError(err) || attempt === maxAttempts) throw err;
       const delay = 1000 * 2 ** (attempt - 1);
@@ -100,7 +109,7 @@ export async function signAndEnqueue(
   config: MpcServiceConfig,
   event: CreatedEvent,
 ): Promise<PendingTx> {
-  const { orchCid, userId, actAs, rootPrivateKey } = config;
+  const { canton, orchCid, userId, actAs, rootPrivateKey } = config;
   const {
     requester,
     path: requestPath,
@@ -148,7 +157,7 @@ export async function signAndEnqueue(
   const { r, s, v } = signEvmTxHash(childPrivateKey, txHash);
 
   console.log(`[MPC] Signing EVM tx, exercising SignEvmTx`);
-  await exerciseChoiceWithRetry(userId, actAs, VAULT_ORCHESTRATOR, orchCid, "SignEvmTx", {
+  await exerciseChoiceWithRetry(canton, userId, actAs, VAULT_ORCHESTRATOR, orchCid, "SignEvmTx", {
     requester,
     requestId,
     r,
@@ -243,6 +252,7 @@ async function reportOutcome(
   try {
     console.log(`[MPC] Exercising ProvideEvmOutcomeSig for requestId=${tx.requestId}`);
     await exerciseChoiceWithRetry(
+      config.canton,
       config.userId,
       config.actAs,
       VAULT_ORCHESTRATOR,

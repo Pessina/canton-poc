@@ -1,15 +1,6 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  allocateParty,
-  createUser,
-  uploadDar,
-  createContract,
-  exerciseChoice,
-  getActiveContracts,
-  getDisclosedContract,
-  type CreatedEvent,
-} from "../../infra/canton-client.js";
+import { CantonClient, type CreatedEvent } from "../../infra/canton-client.js";
 import { findCreated, firstCreated } from "../../infra/canton-helpers.js";
 import {
   VaultOrchestrator,
@@ -57,6 +48,8 @@ export function tryLoadEnv() {
   }
 }
 
+const canton = new CantonClient();
+
 export async function pollForContract(
   parties: string[],
   templateId: string,
@@ -65,7 +58,7 @@ export async function pollForContract(
 ): Promise<CreatedEvent> {
   const startTime = Date.now();
   while (Date.now() - startTime < POLL_TIMEOUT) {
-    const contracts = await getActiveContracts(parties, templateId);
+    const contracts = await canton.getActiveContracts(parties, templateId);
     const match = contracts.find((c) => predicate(c.createArgument as Record<string, unknown>));
     if (match) return match;
     await new Promise((r) => setTimeout(r, POLL_INTERVAL));
@@ -76,12 +69,13 @@ export async function pollForContract(
 // ── Vault setup ──
 
 export interface VaultSetup {
+  canton: CantonClient;
   mpcServer: MpcServer;
   issuer: string;
   requester: string;
   mpc: string;
   orchCid: string;
-  orchDisclosure: Awaited<ReturnType<typeof getDisclosedContract>>;
+  orchDisclosure: Awaited<ReturnType<CantonClient["getDisclosedContract"]>>;
   vaultAddress: `0x${string}`;
   vaultAddressPadded: string;
   userId: string;
@@ -92,12 +86,12 @@ export async function setupVault(
   userId: string,
   partyPrefix: string,
 ): Promise<VaultSetup> {
-  await uploadDar(DAR_PATH);
+  await canton.uploadDar(DAR_PATH);
 
-  const issuer = await allocateParty(`${partyPrefix}Issuer`);
-  const requester = await allocateParty(`${partyPrefix}Requester`);
-  const mpc = await allocateParty(`${partyPrefix}Mpc`);
-  await createUser(userId, issuer, [requester, mpc]);
+  const issuer = await canton.allocateParty(`${partyPrefix}Issuer`);
+  const requester = await canton.allocateParty(`${partyPrefix}Requester`);
+  const mpc = await canton.allocateParty(`${partyPrefix}Mpc`);
+  await canton.createUser(userId, issuer, [requester, mpc]);
 
   const vaultAddress = deriveDepositAddress(
     env.MPC_ROOT_PUBLIC_KEY,
@@ -107,7 +101,7 @@ export async function setupVault(
   const vaultAddressPadded = vaultAddress.slice(2).padStart(64, "0");
 
   const mpcPubKeySpki = toSpkiPublicKey(env.MPC_ROOT_PUBLIC_KEY);
-  const orchResult = await createContract(userId, [issuer], VAULT_ORCHESTRATOR, {
+  const orchResult = await canton.createContract(userId, [issuer], VAULT_ORCHESTRATOR, {
     issuer,
     mpc,
     mpcPublicKey: mpcPubKeySpki,
@@ -116,9 +110,10 @@ export async function setupVault(
   });
   const orchEvent = findCreated(orchResult.transaction.events, "VaultOrchestrator");
   const orchCid = orchEvent.contractId;
-  const orchDisclosure = await getDisclosedContract([issuer], VAULT_ORCHESTRATOR, orchCid);
+  const orchDisclosure = await canton.getDisclosedContract([issuer], VAULT_ORCHESTRATOR, orchCid);
 
   const mpcServer = new MpcServer({
+    canton,
     orchCid,
     userId,
     parties: [issuer],
@@ -129,6 +124,7 @@ export async function setupVault(
   await mpcServer.waitUntilReady();
 
   return {
+    canton,
     mpcServer,
     issuer,
     requester,
@@ -156,7 +152,7 @@ export async function executeDepositFlow(
   setup: VaultSetup,
   logPrefix = "[e2e]",
 ): Promise<DepositResult> {
-  const { issuer, requester, orchCid, orchDisclosure, vaultAddressPadded, userId } = setup;
+  const { canton, issuer, requester, orchCid, orchDisclosure, vaultAddressPadded, userId } = setup;
 
   const requesterPath = requester;
   const depositAddress = deriveDepositAddress(
@@ -193,7 +189,7 @@ export async function executeDepositFlow(
 
   // ── Auth card flow ──
   console.log(`${logPrefix} RequestDepositAuth`);
-  const proposalResult = await exerciseChoice(
+  const proposalResult = await canton.exerciseChoice(
     userId,
     [requester],
     VAULT_ORCHESTRATOR,
@@ -206,7 +202,7 @@ export async function executeDepositFlow(
   const proposalCid = firstCreated(proposalResult.transaction.events).contractId;
 
   console.log(`${logPrefix} ApproveDepositAuth`);
-  const approveResult = await exerciseChoice(
+  const approveResult = await canton.exerciseChoice(
     userId,
     [issuer],
     VAULT_ORCHESTRATOR,
@@ -219,7 +215,7 @@ export async function executeDepositFlow(
 
   // ── Request deposit ──
   console.log(`${logPrefix} RequestEvmDeposit`);
-  const depositResult = await exerciseChoice(
+  const depositResult = await canton.exerciseChoice(
     userId,
     [requester],
     VAULT_ORCHESTRATOR,
@@ -295,7 +291,7 @@ export async function executeDepositFlow(
 
   // ── Claim deposit ──
   console.log(`${logPrefix} ClaimEvmDeposit`);
-  const claimResult = await exerciseChoice(
+  const claimResult = await canton.exerciseChoice(
     userId,
     [requester],
     VAULT_ORCHESTRATOR,

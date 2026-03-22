@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { getActiveContracts } from "../infra/canton-client.js";
 import {
   tryLoadEnv,
   setupVault,
@@ -31,7 +30,10 @@ describeIf("sepolia e2e deposit lifecycle", () => {
     expect(result.holdingArgs.issuer).toBe(setup.issuer);
     expect(result.holdingArgs.amount).toBe(result.amountPadded);
 
-    const activeHoldings = await getActiveContracts([setup.issuer, setup.requester], ERC20_HOLDING);
+    const activeHoldings = await setup.canton.getActiveContracts(
+      [setup.issuer, setup.requester],
+      ERC20_HOLDING,
+    );
     expect(
       activeHoldings.some((c) => (c.createArgument as Erc20Holding).owner === setup.requester),
     ).toBe(true);

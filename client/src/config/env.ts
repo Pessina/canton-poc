@@ -16,9 +16,6 @@ const EnvSchema = z.object({
   ERC20_ADDRESS: hex.default("0xB4F1737Af37711e9A5890D9510c9bB60e170CB0D" as Hex),
   FAUCET_PRIVATE_KEY: hex,
   VAULT_ID: z.string(),
-  SEPOLIA_CHAIN_ID: z.literal(11155111),
-  CAIP2_ID: z.literal("eip155:11155111"),
-  KEY_VERSION: z.literal(1),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -32,8 +29,5 @@ export function loadEnv(): Env {
     ERC20_ADDRESS: process.env.ERC20_ADDRESS,
     FAUCET_PRIVATE_KEY: process.env.FAUCET_PRIVATE_KEY ?? process.env.MPC_ROOT_PRIVATE_KEY,
     VAULT_ID: process.env.VAULT_ID,
-    SEPOLIA_CHAIN_ID: 11155111,
-    CAIP2_ID: "eip155:11155111",
-    KEY_VERSION: 1,
   });
 }

@@ -1,6 +1,7 @@
 module TestHexCompare where
 
 import Daml.Script
+import qualified DA.Text
 import DA.Crypto.Text (BytesHex, maxUInt256Hex)
 import HexCompare
 
@@ -150,3 +151,47 @@ testHexCompareMixedCase = do
 testHexMaxUInt256 : Script ()
 testHexMaxUInt256 = do
   assertMsg "maxVal == maxUInt256Hex" (hexEqUint maxVal maxUInt256Hex)
+
+-- ---------------------------------------------------------------------------
+-- Tests: hexPadUint256 edge cases
+-- ---------------------------------------------------------------------------
+
+testHexPadUint256Overlong : Script ()
+testHexPadUint256Overlong = do
+  let overlong = maxVal <> "ab"  -- 66 chars
+  assertMsg "overlong result is 64 chars" (DA.Text.length (hexPadUint256 overlong) == 64)
+  assertMsg "overlong takes first 64 chars" (hexPadUint256 overlong == maxVal)
+
+testHexPadUint256Exact : Script ()
+testHexPadUint256Exact = do
+  assertMsg "exactly 64 chars unchanged" (hexPadUint256 maxVal == maxVal)
+  assertMsg "exactly 64 chars length" (DA.Text.length (hexPadUint256 maxVal) == 64)
+
+-- ---------------------------------------------------------------------------
+-- Tests: hexIsZero edge cases
+-- ---------------------------------------------------------------------------
+
+testHexIsZeroEmpty : Script ()
+testHexIsZeroEmpty = do
+  assertMsg "empty string is zero" (hexIsZero "")
+
+testHexIsZeroCaseInsensitive : Script ()
+testHexIsZeroCaseInsensitive = do
+  assertMsg "uppercase non-zero not zero" (not (hexIsZero "000000000000000000000000000000000000000000000000000000000000000A"))
+
+-- ---------------------------------------------------------------------------
+-- Tests: pad-then-compare workflow
+-- ---------------------------------------------------------------------------
+
+testHexPadThenCompare : Script ()
+testHexPadThenCompare = do
+  let padA = hexPadUint256 "ff"    -- 255
+      padB = hexPadUint256 "100"   -- 256
+  assertMsg "padded ff < padded 100" (hexCompareUint padA padB == LT)
+  assertMsg "padded 100 > padded ff" (hexCompareUint padB padA == GT)
+  let padMax = hexPadUint256 "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  assertMsg "padded max == maxVal" (hexEqUint padMax maxVal)
+  let padZero = hexPadUint256 ""
+      padOne  = hexPadUint256 "1"
+  assertMsg "padded empty < padded 1" (hexCompareUint padZero padOne == LT)
+  assertMsg "padded empty is zero" (hexIsZero padZero)
