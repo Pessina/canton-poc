@@ -7,7 +7,6 @@
     "test:watch": "vitest",
     "test:e2e:sepolia": "vitest run src/test/sepolia-e2e.test.ts",
     "mpc-service": "tsx src/mpc-service/index.ts",
-    "relayer": "tsx src/relayer/index.ts",
     "sepolia:preflight": "tsx src/scripts/sepolia-preflight.ts",
     "daml:build": "cd .. && dpm build",
     "daml:test": "cd .. && dpm test",

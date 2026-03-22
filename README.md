@@ -6,7 +6,7 @@ MPC-based ERC-20 custody on Canton. Daml smart contracts manage vault state (dep
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Java | 21+ | [Temurin](https://adoptium.net/) |
+| Java | 17+ | [Temurin](https://adoptium.net/) |
 | Daml SDK (DPM) | 3.4.11 | `curl -sSL https://get.digitalasset.com/install/install.sh \| sh` |
 | Node.js | 20+ | [nodejs.org](https://nodejs.org/) |
 | pnpm | 10+ | `corepack enable && corepack prepare pnpm@latest --activate` |
@@ -15,11 +15,11 @@ After installing DPM, make sure `~/.dpm/bin` is on your `PATH`.
 
 ## Configuration
 
-The TypeScript client reads `CANTON_JSON_API_URL` from the environment to connect to the Canton JSON Ledger API. Defaults to `http://localhost:7575` if unset.
+The MPC service reads `CANTON_JSON_API_URL` from `client/.env` and passes it to the `CantonClient` constructor. Defaults to `http://localhost:7575` if unset. Tests always use the default.
 
 ```bash
-# Point to a remote or non-default sandbox
-export CANTON_JSON_API_URL=http://my-canton-node:7575
+# In client/.env — point to a remote or non-default sandbox
+CANTON_JSON_API_URL=http://my-canton-node:7575
 ```
 
 See `client/.env.example` for all available variables.
@@ -60,13 +60,13 @@ pnpm test:watch    # watch mode
 
 ### One-liner rebuild
 
-If you change Daml sources and need a full clean rebuild:
+If you change Daml sources and need a full clean rebuild (requires sandbox running for OpenAPI codegen):
 
 ```bash
 cd client && pnpm generate
 ```
 
-This runs `clean -> daml:build -> codegen:daml -> install` in sequence.
+This runs `clean -> daml:build -> codegen:daml -> codegen:api -> install`.
 
 ## Daml Unit Tests
 
@@ -115,48 +115,6 @@ Send to the faucet address:
 ```bash
 # Start sandbox in a separate terminal first, then:
 pnpm test:e2e:sepolia
-```
-
-## Project Structure
-
-```
-daml/                       Daml smart contracts
-  Erc20Vault.daml             Core templates: VaultOrchestrator, Erc20Holding, PendingEvmTx, ...
-  Crypto.daml                 Hex utilities, EIP-712 domain separator
-  RequestId.daml              EIP-712 struct hashing for EvmTransactionParams
-  Abi.daml                    ABI encoding/decoding library
-  HexCompare.daml             Unsigned/signed hex comparison
-  Types.daml                  Shared data types (EvmTransactionParams)
-  Test*.daml                  Daml Script tests
-
-client/src/
-  infra/                    Canton JSON Ledger API client + helpers
-    canton-client.ts          Type-safe openapi-fetch wrapper
-    canton-helpers.ts         Event extraction utilities
-    ledger-stream.ts          WebSocket update stream with reconnect
-  mpc/                      MPC cryptography
-    address-derivation.ts     Deposit address derivation (signet.js)
-    crypto.ts                 EIP-712 requestId / responseHash (mirrors Daml)
-  mpc-service/              MPC signing service
-    index.ts                  Entry point: DAR upload, party bootstrap, start server
-    server.ts                 Ledger stream monitor for PendingEvmTx
-    signer.ts                 Child key derivation + ECDSA signing
-    tx-handler.ts             Sign -> submit -> confirm lifecycle
-  evm/
-    tx-builder.ts             EIP-1559 tx serialization via viem
-  config/
-    env.ts                    Zod-validated env config
-  scripts/
-    sepolia-preflight.ts      Check faucet balances and print deposit addresses
-  test/                     Vitest test suite
-    abi.test.ts               ABI encoding cross-language vectors (matches Daml)
-    crypto.test.ts            EIP-712 requestId / responseHash
-    signer.test.ts            MPC child key derivation + signing
-    address-derivation.test.ts  Deposit address derivation
-    visibility-permissions.test.ts  Canton contract visibility & permission checks
-    sepolia-e2e.test.ts       Sepolia deposit lifecycle e2e
-    sepolia-withdrawal-e2e.test.ts  Sepolia withdrawal lifecycle e2e
-    helpers/                  Shared e2e setup and Sepolia utilities
 ```
 
 ## Available Scripts
