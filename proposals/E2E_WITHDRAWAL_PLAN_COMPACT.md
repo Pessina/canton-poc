@@ -11,8 +11,9 @@ proof of every step.
 1. User exercises `RequestEvmWithdrawal` on Canton, providing their
    `Erc20Holding` and EVM transaction parameters for the withdrawal
 2. VaultOrchestrator validates the holding (ownership, ERC20 address, amount),
-   archives it (optimistic debit), and creates a `PendingEvmWithdrawal`
-3. MPC Service observes the `PendingEvmWithdrawal`
+   archives it (optimistic debit), and creates a `PendingEvmTx` with
+   `source = WithdrawalSource`
+3. MPC Service observes the `PendingEvmTx`
 4. MPC Service builds, serializes, and signs the EVM withdrawal transaction
 5. MPC Service exercises `SignEvmTx` on Canton, creating an `EcdsaSignature`
 6. User observes the `EcdsaSignature`, reconstructs the signed transaction,
@@ -44,13 +45,13 @@ failure, the user's `Erc20Holding` is restored.
  |                              | archives it (optimistic      |                              |
  |                              | debit)                       |                              |
  |                              |                              |                              |
- |                              | 2. creates PendingEvmWdl     |                              |
- |                              |    (path="root", evmParams,  |                              |
- |                              |    requester,                |                              |
- |                              |    balanceCidText,           |                              |
- |                              |    balanceCid)               |                              |
+ |                              | 2. creates PendingEvmTx      |                              |
+ |                              |    (source=WithdrawalSource, |                              |
+ |                              |     path="root", evmParams,  |                              |
+ |                              |     requester,               |                              |
+ |                              |     nonceCidText)            |                              |
  |                              |                              |                              |
- |                              |    observes PendingEvmWdl    |                              |
+ |                              |    observes PendingEvmTx     |                              |
  |                              |----------------------------->|                              |
  |                              |                              |                              |
  |                              |                              | 3. buildCalldata             |
@@ -88,7 +89,7 @@ failure, the user's `Erc20Holding` is restored.
  |    CompleteEvmWithdrawal     |                              |                              |
  |-- pending, outcome, ecdsa -->|                              |                              |
  |                              |                              |                              |
- |                              | 9. archive PendingEvmWdl     |                              |
+ |                              | 9. archive PendingEvmTx      |                              |
  |                              |     archive EvmTxOutcomeSig  |                              |
  |                              |     archive EcdsaSignature   |                              |
  |                              |                              |                              |
@@ -122,11 +123,11 @@ template VaultOrchestrator
     -- Deposit choices (existing, see E2E_DEPOSIT_PLAN_COMPACT.md)
     nonconsuming choice RequestDepositAuth    : ContractId DepositAuthProposal
     nonconsuming choice ApproveDepositAuth    : ContractId DepositAuthorization
-    nonconsuming choice RequestEvmDeposit     : ContractId PendingEvmDeposit
+    nonconsuming choice RequestEvmDeposit     : ContractId PendingEvmTx
     nonconsuming choice ClaimEvmDeposit       : ContractId Erc20Holding
 
     -- Withdrawal choices (new)
-    nonconsuming choice RequestEvmWithdrawal  : ContractId PendingEvmWithdrawal
+    nonconsuming choice RequestEvmWithdrawal  : ContractId PendingEvmTx
     nonconsuming choice CompleteEvmWithdrawal : Optional (ContractId Erc20Holding)
 
     -- Evidence choices (shared by deposit and withdrawal)
@@ -134,33 +135,17 @@ template VaultOrchestrator
     nonconsuming choice ProvideEvmOutcomeSig  : ContractId EvmTxOutcomeSignature
 ```
 
-### `PendingEvmWithdrawal` (Erc20Vault.daml)
+### `PendingEvmTx` (Erc20Vault.daml)
 
-Anchor contract for the withdrawal lifecycle. Structurally mirrors
-`PendingEvmDeposit`; the key differences are `path = "root"` (vault key)
-and `balanceCidText`/`balanceCid` replacing the deposit's auth-card nonce.
+Unified anchor contract for both deposit and withdrawal lifecycles — see
+`E2E_DEPOSIT_PLAN_COMPACT.md` for the full template definition and field
+documentation. The withdrawal flow uses it with:
 
-```daml
-template PendingEvmWithdrawal
-  with
-    issuer         : Party        -- the party that operates the vault
-    requester      : Party        -- the user initiating the withdrawal
-    mpc            : Party        -- the MPC signing service party
-    requestId      : BytesHex
-    path           : Text         -- "root" (vault derivation path)
-    evmParams      : EvmTransactionParams
-    vaultId        : Text         -- issuer-controlled discriminator (from VaultOrchestrator)
-    balanceCidText : Text         -- user-supplied, Erc20Holding contractId as text (nonce for requestId)
-    balanceCid     : ContractId Erc20Holding  -- injected by VaultOrchestrator, verified
-    keyVersion     : Int          -- e.g., 1
-    algo           : Text         -- e.g., "ECDSA"
-    dest           : Text         -- e.g., "ethereum"
-  where
-    signatory issuer
-    observer mpc, requester
-```
+- `source = WithdrawalSource balanceCid`
+- `path = "root"` (vault key derivation)
+- `nonceCidText = balanceCidText` (the `Erc20Holding` contractId as text)
 
-All other contracts (`EvmTransactionParams`, `EcdsaSignature`,
+All other contracts (`EvmTransactionParams`, `TxSource`, `EcdsaSignature`,
 `EvmTxOutcomeSignature`, `Erc20Holding`) are unchanged from the deposit flow —
 see `E2E_DEPOSIT_PLAN_COMPACT.md`.
 
@@ -168,7 +153,7 @@ see `E2E_DEPOSIT_PLAN_COMPACT.md`.
 
 **`RequestEvmWithdrawal`** — user initiates a withdrawal from their
 `Erc20Holding`. Archives the holding (optimistic debit) and creates a
-`PendingEvmWithdrawal`.
+`PendingEvmTx` with `source = WithdrawalSource`.
 
 No authorization card is needed — the `Erc20Holding` itself is the
 authorization. Ownership is verified by fetching the contract and checking
@@ -177,7 +162,7 @@ for `requestId` (globally unique, cryptographically generated by Canton,
 consumed exactly once).
 
 ```daml
-nonconsuming choice RequestEvmWithdrawal : ContractId PendingEvmWithdrawal
+nonconsuming choice RequestEvmWithdrawal : ContractId PendingEvmTx
   with
     requester        : Party
     evmParams        : EvmTransactionParams
@@ -213,18 +198,19 @@ nonconsuming choice RequestEvmWithdrawal : ContractId PendingEvmWithdrawal
     let fullPath = "root"
     let caip2Id = "eip155:" <> chainIdToDecimalText evmParams.chainId
     let requestId = computeRequestId sender evmParams caip2Id keyVersion fullPath algo dest balanceCidText
-    create PendingEvmWithdrawal with
+    create PendingEvmTx with
       issuer; requester; mpc; requestId; path = fullPath; evmParams
-      vaultId; balanceCidText; balanceCid; keyVersion; algo; dest
+      vaultId; nonceCidText = balanceCidText; source = WithdrawalSource balanceCid
+      keyVersion; algo; dest
 ```
 
-`PendingEvmWithdrawal` carries two balance references — same dual-reference
+`PendingEvmTx` carries two nonce references — same dual-reference
 pattern as deposit's `authCidText`/`authCid` (see `E2E_DEPOSIT_PLAN_COMPACT.md`):
 
-- **`balanceCidText : Text`** — input to `computeRequestId`; globally unique
+- **`nonceCidText : Text`** — input to `computeRequestId`; globally unique
   (consumed exactly once), guaranteeing `requestId` uniqueness.
 
-- **`balanceCid : ContractId Erc20Holding`** — injected by `VaultOrchestrator`
+- **`source : WithdrawalSource balanceCid`** — injected by `VaultOrchestrator`
   after fetch + validation. Non-spoofable; MPC reads it directly from the
   contract payload.
 
@@ -237,9 +223,10 @@ deposit uses `sender + "," + userPath` for per-user deposit addresses.
 (unchanged, see `E2E_DEPOSIT_PLAN_COMPACT.md`).
 
 **`CompleteEvmWithdrawal`** — user triggers completion after observing the
-outcome signature. Archives all evidence contracts. On success
-(`mpcOutput == "01"`), the withdrawal is final — tokens are on Sepolia. On
-failure, a refund `Erc20Holding` is created to restore the user's balance.
+outcome signature. Asserts `WithdrawalSource` and archives all evidence
+contracts. On success (`mpcOutput == "01"`), the withdrawal is final — tokens
+are on Sepolia. On failure, a refund `Erc20Holding` is created to restore the
+user's balance.
 
 Unlike `ClaimEvmDeposit` (which rejects on failure), `CompleteEvmWithdrawal`
 must handle both outcomes because the holding was already archived in
@@ -249,7 +236,7 @@ must handle both outcomes because the holding was already archived in
 nonconsuming choice CompleteEvmWithdrawal : Optional (ContractId Erc20Holding)
   with
     requester   : Party
-    pendingCid  : ContractId PendingEvmWithdrawal
+    pendingCid  : ContractId PendingEvmTx
     outcomeCid  : ContractId EvmTxOutcomeSignature
     ecdsaCid    : ContractId EcdsaSignature
   controller requester
@@ -257,6 +244,10 @@ nonconsuming choice CompleteEvmWithdrawal : Optional (ContractId Erc20Holding)
     pending <- fetch pendingCid
     outcome <- fetch outcomeCid
     ecdsa   <- fetch ecdsaCid
+
+    case pending.source of
+      WithdrawalSource _ -> pure ()
+      _ -> abort "PendingEvmTx is not a withdrawal"
 
     assertMsg "Pending issuer mismatch"
       (pending.issuer == issuer)
@@ -295,3 +286,50 @@ No new functions. `computeRequestId` and `computeResponseHash` are reused
 as-is — the nonce slot (`authCidText` for deposit) receives `balanceCidText`
 for withdrawal.
 
+## Upgradability
+
+The `TxSource` variant is designed for forward-compatible extension. Adding new
+operation types (e.g., swap, mint) follows this pattern:
+
+### Adding a New Operation Type
+
+1. **Append a constructor to `TxSource`** — new variants must go at the end:
+
+```daml
+data TxSource
+  = DepositSource (ContractId DepositAuthorization)
+  | WithdrawalSource (ContractId Erc20Holding)
+  | SwapSource (ContractId SwapRequest)              -- new, appended at end
+  deriving (Eq, Show)
+```
+
+2. **Add new choices on `VaultOrchestrator`** (e.g., `RequestEvmSwap`,
+   `CompleteEvmSwap`) — existing choices and the template definition are
+   untouched.
+
+3. **Upload the new DAR** — Canton validates it as a compatible upgrade.
+
+4. **Regenerate TS codegen** (`pnpm codegen:daml`) and update the MPC service.
+
+### Daml Upgrade Rules for Variants
+
+- Appending constructors at the end = **compatible upgrade** (no sandbox restart)
+- Inserting, reordering, renaming, or removing constructors = **incompatible**
+- `VaultOrchestrator` template fields (`issuer`, `mpc`, `mpcPublicKey`,
+  `vaultAddress`, `vaultId`) are decoupled from `TxSource` — only choices
+  reference pending contract types
+
+### What Requires No Migration
+
+- Existing `PendingEvmTx` contracts on the ledger — stored `DepositSource` /
+  `WithdrawalSource` values are valid in the new type (superset)
+- Existing deposit/withdrawal flows — zero changes
+- `computeRequestId`, `computeResponseHash` — reused as-is
+- Evidence contracts (`EcdsaSignature`, `EvmTxOutcomeSignature`) — flow-agnostic
+
+### Multi-Participant Coordination
+
+All participants must have the new DAR before creating contracts with the new
+variant. A participant still on v1 will fail at runtime if it encounters a
+contract carrying an unknown constructor (e.g., `SwapSource`). For participants
+that have upgraded, existing v1-created contracts are readable with no migration.
