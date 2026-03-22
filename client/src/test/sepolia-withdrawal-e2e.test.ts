@@ -1,29 +1,33 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-  allocateParty,
-  createUser,
-  uploadDar,
-  createContract,
-  exerciseChoice,
-  getActiveContracts,
-  getDisclosedContract,
-  type CreatedEvent,
-} from "../infra/canton-client.js";
-import { findCreated, firstCreated } from "../infra/canton-helpers.js";
-import {
-  VaultOrchestrator,
-  Erc20Holding,
-  EcdsaSignature,
-  EvmTxOutcomeSignature,
-  PendingEvmTx,
-} from "@daml.js/canton-mpc-poc-0.0.1/lib/Erc20Vault/module";
-import { MpcServer } from "../mpc-service/server.js";
-import { chainIdHexToCaip2, deriveDepositAddress } from "../mpc/address-derivation.js";
-import { computeRequestId, toSpkiPublicKey } from "../mpc/crypto.js";
+import { createPublicClient, createWalletClient, http } from "viem";
+import { privateKeyToAddress, privateKeyToAccount } from "viem/accounts";
+import { sepolia } from "viem/chains";
+import { exerciseChoice, getActiveContracts } from "../infra/canton-client.js";
+import { findCreated } from "../infra/canton-helpers.js";
+import { chainIdHexToCaip2 } from "../mpc/address-derivation.js";
+import { computeRequestId } from "../mpc/crypto.js";
 import { reconstructSignedTx, submitRawTransaction } from "../evm/tx-builder.js";
-import { loadEnv } from "../config/env.js";
+import { deriveChildPrivateKey } from "../mpc-service/signer.js";
+import {
+  tryLoadEnv,
+  setupVault,
+  executeDepositFlow,
+  pollForContract,
+  VAULT_ORCHESTRATOR,
+  ECDSA_SIGNATURE,
+  OUTCOME_SIGNATURE,
+  ERC20_HOLDING,
+  SEPOLIA_CHAIN_ID,
+  GAS_LIMIT,
+  KEY_VERSION,
+  ALGO,
+  DEST,
+  type VaultSetup,
+  type PendingEvmTx,
+  type EcdsaSignature,
+  type EvmTxOutcomeSignature,
+  type Erc20Holding,
+} from "./helpers/e2e-setup.js";
 import {
   DEPOSIT_AMOUNT,
   fetchNonce,
@@ -33,235 +37,31 @@ import {
   fundFromFaucet,
 } from "./helpers/sepolia-helpers.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.dar");
-const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
-const ECDSA_SIGNATURE = EcdsaSignature.templateId;
-const OUTCOME_SIGNATURE = EvmTxOutcomeSignature.templateId;
-const ERC20_HOLDING = Erc20Holding.templateId;
-
-const SEPOLIA_CHAIN_ID = 11155111;
-const GAS_LIMIT = 100_000n;
-const POLL_INTERVAL = 5_000;
-const POLL_TIMEOUT = 180_000;
-
-const KEY_VERSION = 1;
-const ALGO = "ECDSA";
-const DEST = "ethereum";
-
-async function pollForContract(
-  parties: string[],
-  templateId: string,
-  predicate: (args: Record<string, unknown>) => boolean,
-  label: string,
-): Promise<CreatedEvent> {
-  const startTime = Date.now();
-  while (Date.now() - startTime < POLL_TIMEOUT) {
-    const contracts = await getActiveContracts(parties, templateId);
-    const match = contracts.find((c) => predicate(c.createArgument as Record<string, unknown>));
-    if (match) return match;
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-  }
-  throw new Error(`Timed out waiting for ${label} (${POLL_TIMEOUT / 1000}s)`);
-}
-
-let env: ReturnType<typeof loadEnv> | null = null;
-try {
-  env = loadEnv();
-} catch {
-  // .env missing or incomplete — skip E2E tests
-}
+const env = tryLoadEnv();
 const describeIf = env ? describe : describe.skip;
 
 describeIf("sepolia e2e withdrawal lifecycle", () => {
-  let mpcServer: MpcServer;
-  let issuer: string;
-  let requester: string;
-  let mpc: string;
-  let orchCid: string;
-  let orchDisclosure: Awaited<ReturnType<typeof getDisclosedContract>>;
-  const VAULT_ID = env!.VAULT_ID;
-  let vaultAddressPadded: string;
+  let setup: VaultSetup;
   let holdingCid: string;
 
-  const USER_ID = "sepolia-withdrawal-e2e";
-
   beforeAll(async () => {
-    await uploadDar(DAR_PATH);
+    setup = await setupVault(env!, "sepolia-withdrawal-e2e", "Wdl");
 
-    issuer = await allocateParty("WdlIssuer");
-    requester = await allocateParty("WdlRequester");
-    mpc = await allocateParty("WdlMpc");
-    await createUser(USER_ID, issuer, [requester, mpc]);
-
-    const vaultAddress = deriveDepositAddress(
-      env!.MPC_ROOT_PUBLIC_KEY,
-      `${VAULT_ID}${issuer}`,
-      "root",
-    );
-    vaultAddressPadded = vaultAddress.slice(2).padStart(64, "0");
-
-    const mpcPubKeySpki = toSpkiPublicKey(env!.MPC_ROOT_PUBLIC_KEY);
-    const orchResult = await createContract(USER_ID, [issuer], VAULT_ORCHESTRATOR, {
-      issuer,
-      mpc,
-      mpcPublicKey: mpcPubKeySpki,
-      vaultAddress: vaultAddressPadded,
-      vaultId: VAULT_ID,
-    });
-    const orchEvent = findCreated(orchResult.transaction.events, "VaultOrchestrator");
-    orchCid = orchEvent.contractId;
-    orchDisclosure = await getDisclosedContract([issuer], VAULT_ORCHESTRATOR, orchCid);
-
-    // ── Do a full deposit to get an Erc20Holding ──
-    const requesterPath = requester;
-    const depositAddress = deriveDepositAddress(
-      env!.MPC_ROOT_PUBLIC_KEY,
-      `${VAULT_ID}${issuer}`,
-      `${requester},${requesterPath}`,
-    );
-    console.log(`[wdl-e2e] Deposit address derived: ${depositAddress}`);
-
-    // Fund deposit address
+    // Fund vault address with ERC20 (needed for the withdrawal tx)
     await fundFromFaucet(
       env!.SEPOLIA_RPC_URL,
       env!.FAUCET_PRIVATE_KEY,
-      depositAddress,
+      setup.vaultAddress,
       env!.ERC20_ADDRESS,
       DEPOSIT_AMOUNT,
     );
 
-    // Also fund vault address with ERC20 (for the withdrawal tx)
-    await fundFromFaucet(
-      env!.SEPOLIA_RPC_URL,
-      env!.FAUCET_PRIVATE_KEY,
-      vaultAddress,
-      env!.ERC20_ADDRESS,
-      DEPOSIT_AMOUNT,
-    );
-
-    // Start MPC server before deposit flow
-    mpcServer = new MpcServer({
-      orchCid,
-      userId: USER_ID,
-      parties: [issuer],
-      rootPrivateKey: env!.MPC_ROOT_PRIVATE_KEY,
-      rpcUrl: env!.SEPOLIA_RPC_URL,
-    });
-    await mpcServer.start();
-    await mpcServer.waitUntilReady();
-
-    // Auth card flow
-    const depositNonce = await fetchNonce(env!.SEPOLIA_RPC_URL, depositAddress);
-    const { maxFeePerGas, maxPriorityFeePerGas } = await fetchGasParams(env!.SEPOLIA_RPC_URL);
-    const amountPadded = toCantonHex(DEPOSIT_AMOUNT, 32);
-    const erc20AddressNoPrefix = env!.ERC20_ADDRESS.slice(2).toLowerCase();
-
-    const depositEvmParams = {
-      to: erc20AddressNoPrefix,
-      functionSignature: "transfer(address,uint256)",
-      args: [vaultAddressPadded, amountPadded],
-      value: toCantonHex(0n, 32),
-      nonce: toCantonHex(BigInt(depositNonce), 32),
-      gasLimit: toCantonHex(GAS_LIMIT, 32),
-      maxFeePerGas: toCantonHex(maxFeePerGas, 32),
-      maxPriorityFee: toCantonHex(maxPriorityFeePerGas, 32),
-      chainId: toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32),
-    };
-
-    const proposalResult = await exerciseChoice(
-      USER_ID,
-      [requester],
-      VAULT_ORCHESTRATOR,
-      orchCid,
-      "RequestDepositAuth",
-      { requester },
-      undefined,
-      [orchDisclosure],
-    );
-    const proposalCid = firstCreated(proposalResult.transaction.events).contractId;
-
-    const approveResult = await exerciseChoice(
-      USER_ID,
-      [issuer],
-      VAULT_ORCHESTRATOR,
-      orchCid,
-      "ApproveDepositAuth",
-      { proposalCid, remainingUses: 1 },
-    );
-    const authEvent = findCreated(approveResult.transaction.events, "DepositAuthorization");
-    const authCid = authEvent.contractId;
-
-    const depositResult = await exerciseChoice(
-      USER_ID,
-      [requester],
-      VAULT_ORCHESTRATOR,
-      orchCid,
-      "RequestEvmDeposit",
-      {
-        requester,
-        path: requesterPath,
-        evmParams: depositEvmParams,
-        authCidText: authCid,
-        keyVersion: KEY_VERSION,
-        algo: ALGO,
-        dest: DEST,
-        authCid,
-      },
-      undefined,
-      [orchDisclosure],
-    );
-
-    const pending = findCreated(depositResult.transaction.events, "PendingEvmTx");
-    const pendingCid = pending.contractId;
-    const { requestId } = pending.createArgument as PendingEvmTx;
-
-    // Wait for MPC to sign
-    const ecdsaSig = await pollForContract(
-      [issuer],
-      ECDSA_SIGNATURE,
-      (args) => args.requestId === requestId,
-      "EcdsaSignature (deposit)",
-    );
-    const ecdsaCid = ecdsaSig.contractId;
-    const ecdsaArgs = ecdsaSig.createArgument as EcdsaSignature;
-
-    // Submit deposit tx to Sepolia
-    const signedTx = reconstructSignedTx(depositEvmParams, {
-      r: `0x${ecdsaArgs.r}`,
-      s: `0x${ecdsaArgs.s}`,
-      v: Number(ecdsaArgs.v),
-    });
-    await submitRawTransaction(env!.SEPOLIA_RPC_URL, signedTx);
-
-    // Wait for outcome
-    const outcome = await pollForContract(
-      [issuer],
-      OUTCOME_SIGNATURE,
-      (args) => args.requestId === requestId,
-      "EvmTxOutcomeSignature (deposit)",
-    );
-    const outcomeCid = outcome.contractId;
-
-    // Claim deposit
-    const claimResult = await exerciseChoice(
-      USER_ID,
-      [requester],
-      VAULT_ORCHESTRATOR,
-      orchCid,
-      "ClaimEvmDeposit",
-      { requester, pendingCid, outcomeCid, ecdsaCid },
-      undefined,
-      [orchDisclosure],
-    );
-
-    const holding = findCreated(claimResult.transaction.events, "Erc20Holding");
-    holdingCid = holding.contractId;
-    console.log(`[wdl-e2e] Deposit complete, holdingCid=${holdingCid}`);
+    const deposit = await executeDepositFlow(env!, setup, "[wdl-e2e]");
+    holdingCid = deposit.holdingCid;
   }, 600_000);
 
   afterAll(() => {
-    mpcServer.shutdown();
+    setup.mpcServer.shutdown();
   });
 
   it("completes full withdrawal flow through Sepolia", async () => {
@@ -269,17 +69,11 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
     const amountPadded = toCantonHex(DEPOSIT_AMOUNT, 32);
 
     // Recipient is the faucet address (send tokens back)
-    const { privateKeyToAddress } = await import("viem/accounts");
     const recipientAddress = privateKeyToAddress(env!.FAUCET_PRIVATE_KEY).slice(2).toLowerCase();
     const recipientPadded = recipientAddress.padStart(64, "0");
 
     // Fetch vault nonce and gas
-    const vaultAddress = deriveDepositAddress(
-      env!.MPC_ROOT_PUBLIC_KEY,
-      `${VAULT_ID}${issuer}`,
-      "root",
-    );
-    const vaultNonce = await fetchNonce(env!.SEPOLIA_RPC_URL, vaultAddress);
+    const vaultNonce = await fetchNonce(env!.SEPOLIA_RPC_URL, setup.vaultAddress);
     const { maxFeePerGas, maxPriorityFeePerGas } = await fetchGasParams(env!.SEPOLIA_RPC_URL);
 
     const evmParams = {
@@ -305,13 +99,13 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
     // ── Request withdrawal ──
     console.log("[wdl-e2e] User → Canton: RequestEvmWithdrawal");
     const wdlResult = await exerciseChoice(
-      USER_ID,
-      [requester],
+      setup.userId,
+      [setup.requester],
       VAULT_ORCHESTRATOR,
-      orchCid,
+      setup.orchCid,
       "RequestEvmWithdrawal",
       {
-        requester,
+        requester: setup.requester,
         evmParams,
         recipientAddress: recipientPadded,
         balanceCidText: holdingCid,
@@ -321,7 +115,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
         balanceCid: holdingCid,
       },
       undefined,
-      [orchDisclosure],
+      [setup.orchDisclosure],
     );
 
     const pendingWdl = findCreated(wdlResult.transaction.events, "PendingEvmTx");
@@ -331,7 +125,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     const caip2Id = chainIdHexToCaip2(evmParams.chainId);
     const tsRequestId = computeRequestId(
-      requester,
+      setup.requester,
       evmParams,
       caip2Id,
       KEY_VERSION,
@@ -345,7 +139,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     // ── MPC signs withdrawal tx on Canton ──
     const ecdsaSig = await pollForContract(
-      [issuer],
+      [setup.issuer],
       ECDSA_SIGNATURE,
       (args) => args.requestId === requestId,
       "EcdsaSignature (withdrawal)",
@@ -365,7 +159,7 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     // ── MPC verifies Sepolia receipt and posts outcome signature ──
     const outcome = await pollForContract(
-      [issuer],
+      [setup.issuer],
       OUTCOME_SIGNATURE,
       (args) => args.requestId === requestId,
       "EvmTxOutcomeSignature (withdrawal)",
@@ -377,25 +171,30 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
 
     // ── User completes withdrawal on Canton ──
     await exerciseChoice(
-      USER_ID,
-      [requester],
+      setup.userId,
+      [setup.requester],
       VAULT_ORCHESTRATOR,
-      orchCid,
+      setup.orchCid,
       "CompleteEvmWithdrawal",
       {
-        requester,
+        requester: setup.requester,
         pendingCid: pendingWdlCid,
         outcomeCid,
         ecdsaCid,
       },
       undefined,
-      [orchDisclosure],
+      [setup.orchDisclosure],
     );
 
     // CompleteEvmWithdrawal succeeded (no throw).
     // On success (mpcOutput=="01"): returns None — no refund Erc20Holding created.
-    const holdings = await getActiveContracts([issuer, requester], ERC20_HOLDING);
-    const refund = holdings.find((c) => (c.createArgument as Erc20Holding).owner === requester);
+    const holdings = await getActiveContracts(
+      [setup.issuer, setup.requester],
+      ERC20_HOLDING,
+    );
+    const refund = holdings.find(
+      (c) => (c.createArgument as Erc20Holding).owner === setup.requester,
+    );
     expect(refund).toBeUndefined();
 
     // Verify recipient balance increased on Sepolia
@@ -405,8 +204,155 @@ describeIf("sepolia e2e withdrawal lifecycle", () => {
       `0x${recipientAddress}`,
     );
     console.log(`[wdl-e2e] Recipient ERC20 balance after: ${balanceAfter}`);
-    expect(balanceAfter).toBeGreaterThan(balanceBefore);
+    expect(balanceAfter).toBe(balanceBefore + DEPOSIT_AMOUNT);
 
     console.log("[wdl-e2e] All withdrawal assertions passed");
+  }, 300_000);
+
+  it("refunds Erc20Holding when withdrawal tx is replaced", async () => {
+    // Run a fresh deposit to get a new holding
+    const deposit = await executeDepositFlow(env!, setup, "[wdl-nonce]");
+    const errorHoldingCid = deposit.holdingCid;
+
+    const erc20AddressNoPrefix = env!.ERC20_ADDRESS.slice(2).toLowerCase();
+    const amountPadded = toCantonHex(DEPOSIT_AMOUNT, 32);
+    const recipientAddress = privateKeyToAddress(env!.FAUCET_PRIVATE_KEY).slice(2).toLowerCase();
+    const recipientPadded = recipientAddress.padStart(64, "0");
+
+    // Ensure vault has ETH for the replacement tx (may have been spent on prior withdrawal gas)
+    await fundFromFaucet(
+      env!.SEPOLIA_RPC_URL,
+      env!.FAUCET_PRIVATE_KEY,
+      setup.vaultAddress,
+      env!.ERC20_ADDRESS,
+      DEPOSIT_AMOUNT,
+    );
+
+    const vaultNonce = await fetchNonce(env!.SEPOLIA_RPC_URL, setup.vaultAddress);
+    const { maxFeePerGas, maxPriorityFeePerGas } = await fetchGasParams(env!.SEPOLIA_RPC_URL);
+
+    const evmParams = {
+      to: erc20AddressNoPrefix,
+      functionSignature: "transfer(address,uint256)",
+      args: [recipientPadded, amountPadded],
+      value: toCantonHex(0n, 32),
+      nonce: toCantonHex(BigInt(vaultNonce), 32),
+      gasLimit: toCantonHex(GAS_LIMIT, 32),
+      maxFeePerGas: toCantonHex(maxFeePerGas, 32),
+      maxPriorityFee: toCantonHex(maxPriorityFeePerGas, 32),
+      chainId: toCantonHex(BigInt(SEPOLIA_CHAIN_ID), 32),
+    };
+
+    const balanceBefore = await checkErc20Balance(
+      env!.SEPOLIA_RPC_URL,
+      env!.ERC20_ADDRESS,
+      `0x${recipientAddress}`,
+    );
+
+    // ── Request withdrawal ──
+    console.log("[wdl-nonce] User → Canton: RequestEvmWithdrawal");
+    const wdlResult = await exerciseChoice(
+      setup.userId,
+      [setup.requester],
+      VAULT_ORCHESTRATOR,
+      setup.orchCid,
+      "RequestEvmWithdrawal",
+      {
+        requester: setup.requester,
+        evmParams,
+        recipientAddress: recipientPadded,
+        balanceCidText: errorHoldingCid,
+        keyVersion: KEY_VERSION,
+        algo: ALGO,
+        dest: DEST,
+        balanceCid: errorHoldingCid,
+      },
+      undefined,
+      [setup.orchDisclosure],
+    );
+
+    const pendingWdl = findCreated(wdlResult.transaction.events, "PendingEvmTx");
+    const pendingWdlCid = pendingWdl.contractId;
+    const { requestId } = pendingWdl.createArgument as PendingEvmTx;
+    console.log(`[wdl-nonce] PendingEvmTx created (requestId=${requestId})`);
+
+    // ── Wait for MPC to sign ──
+    const ecdsaSig = await pollForContract(
+      [setup.issuer],
+      ECDSA_SIGNATURE,
+      (args) => args.requestId === requestId,
+      "EcdsaSignature (nonce-replace)",
+    );
+    const ecdsaCid = ecdsaSig.contractId;
+    console.log("[wdl-nonce] EcdsaSignature observed");
+
+    // ── Submit replacement tx from vault (consumes the nonce, not the withdrawal) ──
+    const vaultChildKey = deriveChildPrivateKey(
+      env!.MPC_ROOT_PRIVATE_KEY,
+      `${env!.VAULT_ID}${setup.issuer}`,
+      "root",
+    );
+    const vaultAccount = privateKeyToAccount(vaultChildKey);
+    const publicClient = createPublicClient({ chain: sepolia, transport: http(env!.SEPOLIA_RPC_URL) });
+    const walletClient = createWalletClient({
+      account: vaultAccount,
+      chain: sepolia,
+      transport: http(env!.SEPOLIA_RPC_URL),
+    });
+
+    console.log("[wdl-nonce] Submitting replacement tx (0 ETH self-transfer)");
+    const replacementHash = await walletClient.sendTransaction({
+      to: vaultAccount.address,
+      value: 0n,
+      nonce: vaultNonce,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: replacementHash });
+    console.log(`[wdl-nonce] Replacement tx mined: ${replacementHash}`);
+
+    // ── MPC detects nonce consumed without receipt → mpcOutput="00" ──
+    const outcome = await pollForContract(
+      [setup.issuer],
+      OUTCOME_SIGNATURE,
+      (args) => args.requestId === requestId,
+      "EvmTxOutcomeSignature (nonce-replace)",
+    );
+    const outcomeCid = outcome.contractId;
+    const outcomeArgs = outcome.createArgument as EvmTxOutcomeSignature;
+    expect(outcomeArgs.mpcOutput).toBe("00");
+    console.log("[wdl-nonce] EvmTxOutcomeSignature observed (mpcOutput=00)");
+
+    // ── Complete withdrawal → refund ──
+    const completeResult = await exerciseChoice(
+      setup.userId,
+      [setup.requester],
+      VAULT_ORCHESTRATOR,
+      setup.orchCid,
+      "CompleteEvmWithdrawal",
+      {
+        requester: setup.requester,
+        pendingCid: pendingWdlCid,
+        outcomeCid,
+        ecdsaCid,
+      },
+      undefined,
+      [setup.orchDisclosure],
+    );
+
+    // Refund Erc20Holding should be created (mpcOutput != "01")
+    const refundHolding = findCreated(completeResult.transaction.events, "Erc20Holding");
+    const refundArgs = refundHolding.createArgument as Erc20Holding;
+    expect(refundArgs.owner).toBe(setup.requester);
+    expect(refundArgs.issuer).toBe(setup.issuer);
+    expect(refundArgs.amount).toBe(amountPadded);
+
+    // Recipient balance unchanged (withdrawal never executed)
+    const balanceAfter = await checkErc20Balance(
+      env!.SEPOLIA_RPC_URL,
+      env!.ERC20_ADDRESS,
+      `0x${recipientAddress}`,
+    );
+    expect(balanceAfter).toBe(balanceBefore);
+
+    console.log("[wdl-nonce] All nonce-replacement assertions passed");
   }, 300_000);
 });
