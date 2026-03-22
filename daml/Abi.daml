@@ -27,21 +27,45 @@ abiSlotCount : BytesHex -> Int
 abiSlotCount hex = byteCount hex / 32
 
 -- ---------------------------------------------------------------------------
+-- Calldata helpers
+-- ---------------------------------------------------------------------------
+
+-- | Extract the 4-byte (8 hex char) function selector from calldata.
+abiSelector : BytesHex -> BytesHex
+abiSelector hex =
+  let hexLen = DA.Text.length hex
+  in if hexLen < 8
+     then error ("abiSelector: data too short (" <> show (hexLen / 2) <> " bytes)")
+     else DA.Text.take 8 hex
+
+-- | Strip the 4-byte (8 hex char) function selector from calldata.
+-- After stripping, the result can be decoded with abiSlot/abiDecode* at slot 0.
+abiStripSelector : BytesHex -> BytesHex
+abiStripSelector hex =
+  let hexLen = DA.Text.length hex
+  in if hexLen < 8
+     then error ("abiStripSelector: data too short (" <> show (hexLen / 2) <> " bytes)")
+     else DA.Text.drop 8 hex
+
+-- ---------------------------------------------------------------------------
 -- Static type decoders
 -- ---------------------------------------------------------------------------
 
--- | Decode uint256 at slot i as Int. Errors if value > maxBound Int64.
--- For large uint256 values, use abiSlot to get raw BytesHex instead.
-abiDecodeUint : BytesHex -> Int -> Int
-abiDecodeUint hex i =
-  let slot = abiSlot hex i
-      result : Optional Int = fromHex slot
-  in fromSomeNote ("abiDecodeUint: overflow or invalid at slot " <> show i) result
+-- | Decode uint (any width: uint8..uint256) at slot i as BytesHex.
+-- Returns the full 32-byte (64 hex char) slot — the raw ABI-encoded value.
+abiDecodeUint : BytesHex -> Int -> BytesHex
+abiDecodeUint = abiSlot
 
--- | Decode bool at slot i.
+-- | Decode int (any width: int8..int256) at slot i as BytesHex.
+-- Returns the full 32-byte (64 hex char) slot — raw two's complement.
+-- Use hexCompareInt from HexCompare for signed comparisons.
+abiDecodeInt : BytesHex -> Int -> BytesHex
+abiDecodeInt = abiSlot
+
+-- | Decode bool at slot i. Any non-zero 32-byte slot is true.
 abiDecodeBool : BytesHex -> Int -> Bool
 abiDecodeBool hex i =
-  DA.Text.drop 62 (abiSlot hex i) == "01"
+  abiSlot hex i /= "0000000000000000000000000000000000000000000000000000000000000000"
 
 -- | Decode address at slot i (20 bytes, strips 12-byte zero padding).
 abiDecodeAddress : BytesHex -> Int -> BytesHex
@@ -54,48 +78,20 @@ abiDecodeBytesN : BytesHex -> Int -> Int -> BytesHex
 abiDecodeBytesN hex i n =
   DA.Text.take (n * 2) (abiSlot hex i)
 
+-- Note: Solidity's `function` type (bytes24 = address + selector) is not
+-- supported. It is largely abandoned in practice — use address + interface instead.
+
 -- ---------------------------------------------------------------------------
--- Signed integer decoder
+-- Internal helpers
 -- ---------------------------------------------------------------------------
 
--- | Lowercase a single hex character. Handles both upper and lowercase input.
-lowerHexChar : Text -> Text
-lowerHexChar c = case c of
-  "A" -> "a"; "B" -> "b"; "C" -> "c"; "D" -> "d"; "E" -> "e"; "F" -> "f"
-  _ -> c
-
--- | Invert a single hex nibble (bitwise NOT). Handles both cases.
-invertNibble : Text -> Text
-invertNibble c = case lowerHexChar c of
-  "0" -> "f"; "1" -> "e"; "2" -> "d"; "3" -> "c"
-  "4" -> "b"; "5" -> "a"; "6" -> "9"; "7" -> "8"
-  "8" -> "7"; "9" -> "6"; "a" -> "5"; "b" -> "4"
-  "c" -> "3"; "d" -> "2"; "e" -> "1"; "f" -> "0"
-  other -> error ("invertNibble: invalid hex char: " <> other)
-
--- | Nibble-wise bitwise NOT of a hex string.
-invertHex : BytesHex -> BytesHex
-invertHex hex = DA.Text.implode (map invertNibble (DA.Text.explode hex))
-
--- | Decode signed int256 at slot i as Int. Handles two's complement.
--- Supported range: [-2^63, 2^63-1]. Errors on overflow outside this range.
-abiDecodeInt : BytesHex -> Int -> Int
-abiDecodeInt hex i =
+-- | Internal: decode uint at slot as Int (for offsets and lengths only).
+-- Errors on overflow — only use for values known to fit in Int64.
+abiSlotToInt : BytesHex -> Int -> Int
+abiSlotToInt hex i =
   let slot = abiSlot hex i
-      firstNibble = DA.Text.asciiToLower (DA.Text.take 1 slot)
-      isNegative = firstNibble >= "8"
-  in if not isNegative
-     then
-       let result : Optional Int = fromHex slot
-       in fromSomeNote ("abiDecodeInt: positive overflow at slot " <> show i) result
-     else
-       let lastQword = DA.Text.asciiToLower (DA.Text.drop 48 slot)
-       in if lastQword == "8000000000000000"
-          then -9223372036854775808  -- minBound Int64, special-cased to avoid -(maxBound + 1) overflow
-          else
-            let inverted = invertHex lastQword
-                magnitude : Optional Int = fromHex inverted
-            in -(fromSomeNote ("abiDecodeInt: negative overflow at slot " <> show i) magnitude + 1)
+      result : Optional Int = fromHex slot
+  in fromSomeNote ("abiSlotToInt: overflow at slot " <> show i) result
 
 -- ---------------------------------------------------------------------------
 -- Dynamic type decoders
@@ -103,13 +99,13 @@ abiDecodeInt hex i =
 
 -- | Read ABI offset pointer at slot i (byte offset from start of data).
 abiReadOffset : BytesHex -> Int -> Int
-abiReadOffset = abiDecodeUint
+abiReadOffset = abiSlotToInt
 
 -- | Decode dynamic bytes at the given byte offset.
 -- Layout: uint256 length at offset, then raw data bytes.
 abiDecodeBytes : BytesHex -> Int -> BytesHex
 abiDecodeBytes hex byteOffset =
-  let len = abiDecodeUint hex (byteOffset / 32)
+  let len = abiSlotToInt hex (byteOffset / 32)
       dataStartChar = (byteOffset + 32) * 2
   in if len == 0
      then ""
@@ -128,10 +124,73 @@ abiDecodeString hex byteOffset =
 
 -- | Read dynamic array length at the given byte offset.
 abiDecodeArrayLen : BytesHex -> Int -> Int
-abiDecodeArrayLen hex byteOffset = abiDecodeUint hex (byteOffset / 32)
+abiDecodeArrayLen hex byteOffset = abiSlotToInt hex (byteOffset / 32)
 
 -- | Read the j-th element (0-indexed) of a dynamic array of static 32-byte
 -- elements at the given byte offset. Returns raw 32-byte slot.
 abiDecodeArrayElem : BytesHex -> Int -> Int -> BytesHex
 abiDecodeArrayElem hex byteOffset j =
   abiSlot hex (byteOffset / 32 + 1 + j)
+
+-- | Resolve the j-th element of a dynamic array of dynamic types
+-- (string[], bytes[], tuple[] with dynamic members) at the given byte offset.
+-- Returns the absolute byte offset of the element's data, suitable for
+-- passing to abiDecodeBytes, abiDecodeString, etc.
+abiDecodeArrayDynElem : BytesHex -> Int -> Int -> Int
+abiDecodeArrayDynElem hex byteOffset j =
+  let dataAreaOffset = byteOffset + 32  -- skip length slot
+      elemOffsetSlot = dataAreaOffset / 32 + j
+      relativeOffset = abiSlotToInt hex elemOffsetSlot
+  in dataAreaOffset + relativeOffset
+
+-- | Resolve the j-th element of a fixed-size array of dynamic types
+-- (T[k] where T is dynamic, e.g. string[2]). No length prefix — the data
+-- area starts at the array's base position directly.
+-- Returns the absolute byte offset of the element's data.
+abiDecodeFixedArrayDynElem : BytesHex -> Int -> Int -> Int
+abiDecodeFixedArrayDynElem hex byteOffset j =
+  let elemOffsetSlot = byteOffset / 32 + j
+      relativeOffset = abiSlotToInt hex elemOffsetSlot
+  in byteOffset + relativeOffset
+
+-- ---------------------------------------------------------------------------
+-- Dynamic tuple decoders
+-- ---------------------------------------------------------------------------
+
+-- | Resolve the absolute byte offset of a dynamic member within a tuple.
+-- When a tuple contains a dynamic member (string, bytes, T[], etc.), that
+-- member's head slot holds a byte offset relative to the tuple's start.
+--
+-- Example: (uint256, string, bool) at base offset B:
+--   uint   = abiDecodeUint hex (B / 32 + 0)
+--   strOff = abiDecodeTupleDynMember hex B 1
+--   str    = abiDecodeString hex strOff
+--   flag   = abiDecodeBool hex (B / 32 + 2)
+abiDecodeTupleDynMember : BytesHex -> Int -> Int -> Int
+abiDecodeTupleDynMember hex tupleBaseOffset memberSlotIndex =
+  let relativeOffset = abiSlotToInt hex (tupleBaseOffset / 32 + memberSlotIndex)
+  in tupleBaseOffset + relativeOffset
+
+-- ---------------------------------------------------------------------------
+-- Multi-dimensional array patterns (documentation)
+-- ---------------------------------------------------------------------------
+-- These compose from existing primitives — no dedicated functions needed.
+--
+-- T[][] (dynamic array of dynamic arrays):
+--   outerOff = abiReadOffset hex 0
+--   outerLen = abiDecodeArrayLen hex outerOff
+--   innerOff = abiDecodeArrayDynElem hex outerOff j
+--   innerLen = abiDecodeArrayLen hex innerOff
+--   elem     = abiDecodeArrayElem hex innerOff k  (if T is static)
+--
+-- T[N][] (dynamic array of fixed arrays, T static):
+--   arrOff = abiReadOffset hex 0
+--   arrLen = abiDecodeArrayLen hex arrOff
+--   -- each element is N contiguous static slots starting at:
+--   elemBase = arrOff + 32 + j * N * 32
+--   value    = abiDecodeUint hex (elemBase / 32 + k)
+--
+-- T[][N] (fixed array of dynamic arrays):
+--   innerOff = abiDecodeFixedArrayDynElem hex baseOffset j
+--   innerLen = abiDecodeArrayLen hex innerOff
+--   elem     = abiDecodeArrayElem hex innerOff k  (if T is static)

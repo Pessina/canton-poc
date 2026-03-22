@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeAbiParameters } from "viem";
+import { decodeAbiParameters, encodeAbiParameters } from "viem";
 
 // ---------------------------------------------------------------------------
 // Cross-language vectors (must match Daml TestAbi.daml)
@@ -120,6 +120,105 @@ const VECTORS = {
   // --- Original edge cases ---
   uint256_zero: "0x0000000000000000000000000000000000000000000000000000000000000000",
   uint256_max_int64: "0x0000000000000000000000000000000000000000000000007fffffffffffffff",
+
+  // --- New vectors: bool non-zero, signed int edge cases ---
+  bool_nonzero_true: "0x00000000000000000000000000000000000000000000000000000000000000ff",
+  int256_neg2: "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+  int256_neg255: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01",
+
+  // --- New vectors: calldata ---
+  calldata_transfer:
+    "0x" +
+    "a9059cbb" +
+    "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045" +
+    "00000000000000000000000000000000000000000000000000000000000003e8",
+
+  // --- New vectors: dynamic array of dynamic types ---
+  string_array:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000002" +
+    "0000000000000000000000000000000000000000000000000000000000000040" +
+    "0000000000000000000000000000000000000000000000000000000000000080" +
+    "0000000000000000000000000000000000000000000000000000000000000005" +
+    "48656c6c6f000000000000000000000000000000000000000000000000000000" +
+    "0000000000000000000000000000000000000000000000000000000000000005" +
+    "576f726c64000000000000000000000000000000000000000000000000000000",
+
+  // --- New vectors: fixed array of dynamic types ---
+  string_fixed_array:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000040" +
+    "0000000000000000000000000000000000000000000000000000000000000080" +
+    "0000000000000000000000000000000000000000000000000000000000000005" +
+    "48656c6c6f000000000000000000000000000000000000000000000000000000" +
+    "0000000000000000000000000000000000000000000000000000000000000005" +
+    "576f726c64000000000000000000000000000000000000000000000000000000",
+
+  // --- New vectors: dynamic tuple ---
+  dynamic_tuple:
+    "0x" +
+    "000000000000000000000000000000000000000000000000000000000000002a" +
+    "0000000000000000000000000000000000000000000000000000000000000060" +
+    "0000000000000000000000000000000000000000000000000000000000000001" +
+    "0000000000000000000000000000000000000000000000000000000000000005" +
+    "48656c6c6f000000000000000000000000000000000000000000000000000000",
+
+  // --- New vectors: full-range uint values ---
+  uint256_max: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  uint128_large:
+    "0x0000000000000000000000000000000080000000000000000000000000000001",
+
+  // --- New vectors: boundary cases and additional coverage ---
+  address_zero: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  bytes16:
+    "0xdeadbeefdeadbeefdeadbeefdeadbeef00000000000000000000000000000000",
+  bytes_dynamic_32:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  bytes_dynamic_33:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000021" +
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" +
+    "1100000000000000000000000000000000000000000000000000000000000000",
+  string_33bytes:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000021" +
+    "4142434445464748494a4b4c4d4e4f505152535455565758595a313233343536" +
+    "3700000000000000000000000000000000000000000000000000000000000000",
+  dynamic_tuple_str_first:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000060" +
+    "0000000000000000000000000000000000000000000000000000000000000063" +
+    "0000000000000000000000000000000000000000000000000000000000000001" +
+    "0000000000000000000000000000000000000000000000000000000000000005" +
+    "48656c6c6f000000000000000000000000000000000000000000000000000000",
+  int256_min:
+    "0x8000000000000000000000000000000000000000000000000000000000000000",
+  int256_max_pos:
+    "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  bytes_empty:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000000",
+
+  // --- New vectors: multi-dimensional array ---
+  nested_dynamic_array:
+    "0x" +
+    "0000000000000000000000000000000000000000000000000000000000000020" +
+    "0000000000000000000000000000000000000000000000000000000000000002" +
+    "0000000000000000000000000000000000000000000000000000000000000040" +
+    "00000000000000000000000000000000000000000000000000000000000000a0" +
+    "0000000000000000000000000000000000000000000000000000000000000002" +
+    "0000000000000000000000000000000000000000000000000000000000000001" +
+    "0000000000000000000000000000000000000000000000000000000000000002" +
+    "0000000000000000000000000000000000000000000000000000000000000001" +
+    "0000000000000000000000000000000000000000000000000000000000000003",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -280,5 +379,130 @@ describe("ABI encoding vectors (cross-language ground truth)", () => {
     expect(encodeAbiParameters([{ type: "uint256" }], [9223372036854775807n])).toBe(
       VECTORS.uint256_max_int64,
     );
+  });
+
+  // --- New: bool non-zero, signed int edge cases ---
+  it("bool(0xff) — non-zero non-one is true (viem strict rejects, Daml/Solidity accept)", () => {
+    // viem's decoder is strict and rejects non-0/1 bool values.
+    // Solidity's own ABI decoder accepts any non-zero as true.
+    // Verify the raw byte is non-zero (which our Daml decoder treats as true).
+    const lastByte = VECTORS.bool_nonzero_true.slice(-2);
+    expect(lastByte).toBe("ff");
+    expect(lastByte).not.toBe("00");
+  });
+  it("int256(-2)", () => {
+    expect(encodeAbiParameters([{ type: "int256" }], [-2n])).toBe(VECTORS.int256_neg2);
+  });
+  it("int256(-255)", () => {
+    expect(encodeAbiParameters([{ type: "int256" }], [-255n])).toBe(VECTORS.int256_neg255);
+  });
+  it("int256(2^63-1) — max Int64 as signed", () => {
+    const result = decodeAbiParameters([{ type: "int256" }], VECTORS.uint256_max_int64);
+    expect(result[0]).toBe(9223372036854775807n);
+  });
+
+  // --- New: calldata selector ---
+  it("transfer calldata — selector + address + uint", () => {
+    const stripped = ("0x" + VECTORS.calldata_transfer.slice(10)) as `0x${string}`;
+    const result = decodeAbiParameters([{ type: "address" }, { type: "uint256" }], stripped);
+    expect(result[0].toLowerCase()).toBe(VITALIK.toLowerCase());
+    expect(result[1]).toBe(1000n);
+  });
+
+  // --- New: dynamic array of dynamic types ---
+  it("string[] = ['Hello', 'World']", () => {
+    expect(encodeAbiParameters([{ type: "string[]" }], [["Hello", "World"]])).toBe(
+      VECTORS.string_array,
+    );
+  });
+
+  // --- New: fixed array of dynamic types ---
+  it("string[2] = ['Hello', 'World']", () => {
+    expect(encodeAbiParameters([{ type: "string[2]" }], [["Hello", "World"]])).toBe(
+      VECTORS.string_fixed_array,
+    );
+  });
+
+  // --- New: dynamic tuple ---
+  it("(uint256, string, bool) = (42, 'Hello', true)", () => {
+    expect(
+      encodeAbiParameters(
+        [{ type: "uint256" }, { type: "string" }, { type: "bool" }],
+        [42n, "Hello", true],
+      ),
+    ).toBe(VECTORS.dynamic_tuple);
+  });
+
+  // --- New: multi-dimensional array ---
+  it("uint256[][] = [[1,2],[3]]", () => {
+    expect(encodeAbiParameters([{ type: "uint256[][]" }], [[[1n, 2n], [3n]]])).toBe(
+      VECTORS.nested_dynamic_array,
+    );
+  });
+
+  // --- New: full-range uint values ---
+  it("uint256(max) = 2^256-1", () => {
+    expect(
+      encodeAbiParameters([{ type: "uint256" }], [2n ** 256n - 1n]),
+    ).toBe(VECTORS.uint256_max);
+  });
+  it("uint128(2^127 + 1) — exceeds Int64 range", () => {
+    expect(
+      encodeAbiParameters([{ type: "uint256" }], [2n ** 127n + 1n]),
+    ).toBe(VECTORS.uint128_large);
+  });
+
+  // --- New: boundary cases and additional coverage (viem-verified) ---
+  it("address(zero)", () => {
+    expect(
+      encodeAbiParameters([{ type: "address" }], ["0x0000000000000000000000000000000000000000"]),
+    ).toBe(VECTORS.address_zero);
+  });
+  it("bytes16", () => {
+    expect(
+      encodeAbiParameters([{ type: "bytes16" }], ["0xdeadbeefdeadbeefdeadbeefdeadbeef"]),
+    ).toBe(VECTORS.bytes16);
+  });
+  it("bytes — exactly 32 bytes payload", () => {
+    expect(
+      encodeAbiParameters(
+        [{ type: "bytes" }],
+        ["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      ),
+    ).toBe(VECTORS.bytes_dynamic_32);
+  });
+  it("bytes — 33 bytes payload (crosses word boundary)", () => {
+    expect(
+      encodeAbiParameters(
+        [{ type: "bytes" }],
+        ["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11"],
+      ),
+    ).toBe(VECTORS.bytes_dynamic_33);
+  });
+  it("string — 33 chars (crosses word boundary)", () => {
+    expect(
+      encodeAbiParameters([{ type: "string" }], ["ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567"]),
+    ).toBe(VECTORS.string_33bytes);
+  });
+  it("(string, uint256, bool) = ('Hello', 99, true) — dynamic at index 0", () => {
+    expect(
+      encodeAbiParameters(
+        [{ type: "string" }, { type: "uint256" }, { type: "bool" }],
+        ["Hello", 99n, true],
+      ),
+    ).toBe(VECTORS.dynamic_tuple_str_first);
+  });
+  it("int256(-2^255) — min int256", () => {
+    expect(
+      encodeAbiParameters([{ type: "int256" }], [-(2n ** 255n)]),
+    ).toBe(VECTORS.int256_min);
+  });
+  it("int256(2^255 - 1) — max positive int256", () => {
+    expect(
+      encodeAbiParameters([{ type: "int256" }], [2n ** 255n - 1n]),
+    ).toBe(VECTORS.int256_max_pos);
+  });
+  it("bytes — empty payload", () => {
+    expect(encodeAbiParameters([{ type: "bytes" }], ["0x"])).toBe(VECTORS.bytes_empty);
   });
 });

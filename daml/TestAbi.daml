@@ -161,6 +161,134 @@ vec_uint256_zero = "000000000000000000000000000000000000000000000000000000000000
 vec_uint256_max_int64 : BytesHex
 vec_uint256_max_int64 = "0000000000000000000000000000000000000000000000007fffffffffffffff"
 
+-- New vectors: bool non-zero, signed int edge cases
+vec_bool_nonzero_true : BytesHex
+vec_bool_nonzero_true = "00000000000000000000000000000000000000000000000000000000000000ff"
+
+vec_int256_neg2 : BytesHex
+vec_int256_neg2 = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+
+vec_int256_neg255 : BytesHex
+vec_int256_neg255 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01"
+
+-- New vectors: calldata
+
+vec_calldata_transfer : BytesHex
+vec_calldata_transfer =
+     "a9059cbb"
+  <> "000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045"
+  <> "00000000000000000000000000000000000000000000000000000000000003e8"
+
+-- New vectors: dynamic array of dynamic types — string[] = ["Hello", "World"]
+vec_string_array : BytesHex
+vec_string_array =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000002"
+  <> "0000000000000000000000000000000000000000000000000000000000000040"
+  <> "0000000000000000000000000000000000000000000000000000000000000080"
+  <> "0000000000000000000000000000000000000000000000000000000000000005"
+  <> "48656c6c6f000000000000000000000000000000000000000000000000000000"
+  <> "0000000000000000000000000000000000000000000000000000000000000005"
+  <> "576f726c64000000000000000000000000000000000000000000000000000000"
+
+-- New vectors: fixed array of dynamic types — string[2] = ["Hello", "World"]
+vec_string_fixed_array : BytesHex
+vec_string_fixed_array =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000040"
+  <> "0000000000000000000000000000000000000000000000000000000000000080"
+  <> "0000000000000000000000000000000000000000000000000000000000000005"
+  <> "48656c6c6f000000000000000000000000000000000000000000000000000000"
+  <> "0000000000000000000000000000000000000000000000000000000000000005"
+  <> "576f726c64000000000000000000000000000000000000000000000000000000"
+
+-- New vectors: dynamic tuple — (uint256, string, bool) = (42, "Hello", true)
+vec_dynamic_tuple : BytesHex
+vec_dynamic_tuple =
+     "000000000000000000000000000000000000000000000000000000000000002a"
+  <> "0000000000000000000000000000000000000000000000000000000000000060"
+  <> "0000000000000000000000000000000000000000000000000000000000000001"
+  <> "0000000000000000000000000000000000000000000000000000000000000005"
+  <> "48656c6c6f000000000000000000000000000000000000000000000000000000"
+
+-- New vectors: multi-dimensional array — uint256[][] = [[1,2],[3]]
+vec_nested_dynamic_array : BytesHex
+vec_nested_dynamic_array =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000002"
+  <> "0000000000000000000000000000000000000000000000000000000000000040"
+  <> "00000000000000000000000000000000000000000000000000000000000000a0"
+  <> "0000000000000000000000000000000000000000000000000000000000000002"
+  <> "0000000000000000000000000000000000000000000000000000000000000001"
+  <> "0000000000000000000000000000000000000000000000000000000000000002"
+  <> "0000000000000000000000000000000000000000000000000000000000000001"
+  <> "0000000000000000000000000000000000000000000000000000000000000003"
+
+-- Named max uint256 vector
+vec_uint256_max : BytesHex
+vec_uint256_max = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+-- Large uint128 value (2^127 + 1) — exceeds Int64
+vec_uint128_large : BytesHex
+vec_uint128_large = "0000000000000000000000000000000080000000000000000000000000000001"
+
+-- int256 min (-2^255)
+vec_int256_min : BytesHex
+vec_int256_min = "8000000000000000000000000000000000000000000000000000000000000000"
+
+-- int256 max positive (2^255 - 1)
+vec_int256_max_pos : BytesHex
+vec_int256_max_pos = "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+-- Zero address
+vec_address_zero : BytesHex
+vec_address_zero = "0000000000000000000000000000000000000000000000000000000000000000"
+
+-- bytes16
+vec_bytes16 : BytesHex
+vec_bytes16 = "deadbeefdeadbeefdeadbeefdeadbeef00000000000000000000000000000000"
+
+-- Dynamic bytes: exactly 32 bytes of payload
+vec_bytes_dynamic_32 : BytesHex
+vec_bytes_dynamic_32 =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+-- Dynamic bytes: 33 bytes of payload (crosses word boundary)
+vec_bytes_dynamic_33 : BytesHex
+vec_bytes_dynamic_33 =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000021"
+  <> "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  <> "1100000000000000000000000000000000000000000000000000000000000000"
+
+-- 33-char string (crosses 32-byte word boundary)
+vec_string_33bytes : BytesHex
+vec_string_33bytes =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000021"
+  <> "4142434445464748494a4b4c4d4e4f505152535455565758595a3132333435363700000000000000000000000000000000000000000000000000000000000000"
+
+-- Dynamic tuple with string at index 0: (string, uint256, bool) = ("Hello", 99, true)
+vec_dynamic_tuple_str_first : BytesHex
+vec_dynamic_tuple_str_first =
+     "0000000000000000000000000000000000000000000000000000000000000060"
+  <> "0000000000000000000000000000000000000000000000000000000000000063"
+  <> "0000000000000000000000000000000000000000000000000000000000000001"
+  <> "0000000000000000000000000000000000000000000000000000000000000005"
+  <> "48656c6c6f000000000000000000000000000000000000000000000000000000"
+
+-- Bool with non-zero in non-last byte (malformed but should be true)
+vec_bool_malformed_nonzero : BytesHex
+vec_bool_malformed_nonzero = "0100000000000000000000000000000000000000000000000000000000000000"
+
+-- Empty dynamic bytes
+vec_bytes_empty : BytesHex
+vec_bytes_empty =
+     "0000000000000000000000000000000000000000000000000000000000000020"
+  <> "0000000000000000000000000000000000000000000000000000000000000000"
+
 -- ---------------------------------------------------------------------------
 -- Helper
 -- ---------------------------------------------------------------------------
@@ -191,6 +319,7 @@ testAbiSlotCount = do
   assertMsg "3-slot tuple = 3" (abiSlotCount vec_tuple_uint_addr_bool == 3)
   assertMsg "2-slot tuple = 2" (abiSlotCount vec_tuple_uint_uint == 2)
   assertMsg "5-slot dynamic = 5" (abiSlotCount vec_uint_string_uint == 5)
+  assertMsg "empty data = 0" (abiSlotCount "" == 0)
 
 -- ---------------------------------------------------------------------------
 -- Tests: abiDecodeUint
@@ -198,16 +327,19 @@ testAbiSlotCount = do
 
 testAbiDecodeUint : Script ()
 testAbiDecodeUint = do
-  assertMsg "uint256(1000)" (abiDecodeUint vec_uint256_1000 0 == 1000)
-  assertMsg "uint256(0)" (abiDecodeUint vec_uint256_zero 0 == 0)
-  assertMsg "uint8(255)" (abiDecodeUint vec_uint8_255 0 == 255)
-  assertMsg "uint256(2^63-1)" (abiDecodeUint vec_uint256_max_int64 0 == 9223372036854775807)
-  assertMsg "uint from tuple slot 0" (abiDecodeUint vec_tuple_uint_addr_bool 0 == 1000)
-  assertMsg "uint from tuple (100, 200) slot 0" (abiDecodeUint vec_tuple_uint_uint 0 == 100)
-  assertMsg "uint from tuple (100, 200) slot 1" (abiDecodeUint vec_tuple_uint_uint 1 == 200)
-  assertMsg "fixed array slot 0 = 1" (abiDecodeUint vec_fixed_array_uint256_3 0 == 1)
-  assertMsg "fixed array slot 1 = 2" (abiDecodeUint vec_fixed_array_uint256_3 1 == 2)
-  assertMsg "fixed array slot 2 = 3" (abiDecodeUint vec_fixed_array_uint256_3 2 == 3)
+  assertMsg "uint256(1000)" (abiDecodeUint vec_uint256_1000 0 == "00000000000000000000000000000000000000000000000000000000000003e8")
+  assertMsg "uint256(0)" (abiDecodeUint vec_uint256_zero 0 == "0000000000000000000000000000000000000000000000000000000000000000")
+  assertMsg "uint8(255)" (abiDecodeUint vec_uint8_255 0 == "00000000000000000000000000000000000000000000000000000000000000ff")
+  assertMsg "uint256(2^63-1)" (abiDecodeUint vec_uint256_max_int64 0 == "0000000000000000000000000000000000000000000000007fffffffffffffff")
+  assertMsg "uint from tuple slot 0" (abiDecodeUint vec_tuple_uint_addr_bool 0 == "00000000000000000000000000000000000000000000000000000000000003e8")
+  assertMsg "uint from tuple (100, 200) slot 0" (abiDecodeUint vec_tuple_uint_uint 0 == "0000000000000000000000000000000000000000000000000000000000000064")
+  assertMsg "uint from tuple (100, 200) slot 1" (abiDecodeUint vec_tuple_uint_uint 1 == "00000000000000000000000000000000000000000000000000000000000000c8")
+  assertMsg "fixed array slot 0 = 1" (abiDecodeUint vec_fixed_array_uint256_3 0 == "0000000000000000000000000000000000000000000000000000000000000001")
+  assertMsg "fixed array slot 1 = 2" (abiDecodeUint vec_fixed_array_uint256_3 1 == "0000000000000000000000000000000000000000000000000000000000000002")
+  assertMsg "fixed array slot 2 = 3" (abiDecodeUint vec_fixed_array_uint256_3 2 == "0000000000000000000000000000000000000000000000000000000000000003")
+  -- Full-range: values that previously overflowed
+  assertMsg "uint256(max) no overflow" (abiDecodeUint vec_uint256_max 0 == "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+  assertMsg "uint128 large (2^127+1) no overflow" (abiDecodeUint vec_uint128_large 0 == "0000000000000000000000000000000080000000000000000000000000000001")
 
 -- ---------------------------------------------------------------------------
 -- Tests: abiDecodeBool
@@ -219,6 +351,8 @@ testAbiDecodeBool = do
   assertMsg "bool(false)" (abiDecodeBool vec_bool_false 0 == False)
   assertMsg "bool from tuple slot 2" (abiDecodeBool vec_tuple_uint_addr_bool 2 == True)
   assertMsg "bool false from tuple slot 1" (abiDecodeBool vec_tuple_uint_bool_false 1 == False)
+  assertMsg "bool(0xff) non-zero is true" (abiDecodeBool vec_bool_nonzero_true 0 == True)
+  assertMsg "bool malformed non-zero in first byte is true" (abiDecodeBool vec_bool_malformed_nonzero 0 == True)
 
 -- ---------------------------------------------------------------------------
 -- Tests: abiDecodeAddress
@@ -230,6 +364,7 @@ testAbiDecodeAddress = do
   assertMsg "address from slot" (abiDecodeAddress vec_address_vitalik 0 == expected)
   assertMsg "address from tuple slot 1" (abiDecodeAddress vec_tuple_uint_addr_bool 1 == expected)
   assertMsg "address is 40 hex chars" (DA.Text.length (abiDecodeAddress vec_address_vitalik 0) == 40)
+  assertMsg "zero address" (abiDecodeAddress vec_address_zero 0 == "0000000000000000000000000000000000000000")
 
 -- ---------------------------------------------------------------------------
 -- Tests: abiDecodeBytesN
@@ -243,6 +378,8 @@ testAbiDecodeBytesN = do
   assertMsg "bytes4 is 8 hex chars" (DA.Text.length (abiDecodeBytesN vec_bytes4_deadbeef 0 4) == 8)
   assertMsg "bytes1(0xab)" (abiDecodeBytesN vec_bytes1_ab 0 1 == "ab")
   assertMsg "bytes1 is 2 hex chars" (DA.Text.length (abiDecodeBytesN vec_bytes1_ab 0 1) == 2)
+  assertMsg "bytes16" (abiDecodeBytesN vec_bytes16 0 16 == "deadbeefdeadbeefdeadbeefdeadbeef")
+  assertMsg "bytes0 is empty" (abiDecodeBytesN vec_bytes4_deadbeef 0 0 == "")
 
 -- ---------------------------------------------------------------------------
 -- Tests: abiDecodeInt (signed)
@@ -250,24 +387,18 @@ testAbiDecodeBytesN = do
 
 testAbiDecodeInt : Script ()
 testAbiDecodeInt = do
-  assertMsg "int256(-1)" (abiDecodeInt vec_int256_neg1 0 == -1)
-  assertMsg "int256(-128)" (abiDecodeInt vec_int256_neg128 0 == -128)
-  assertMsg "int256(positive 1000)" (abiDecodeInt vec_uint256_1000 0 == 1000)
-  assertMsg "int256(positive 0)" (abiDecodeInt vec_uint256_zero 0 == 0)
-  assertMsg "int256(0) via int256 type" (abiDecodeInt vec_int256_zero 0 == 0)
-  assertMsg "int256(-2^63) minBound" (abiDecodeInt vec_int256_min_int64 0 == -9223372036854775808)
-
--- ---------------------------------------------------------------------------
--- Tests: invertHex helper
--- ---------------------------------------------------------------------------
-
-testInvertHex : Script ()
-testInvertHex = do
-  assertMsg "invert 00 = ff" (invertHex "00" == "ff")
-  assertMsg "invert ff = 00" (invertHex "ff" == "00")
-  assertMsg "invert 0f = f0" (invertHex "0f" == "f0")
-  assertMsg "invert a5 = 5a" (invertHex "a5" == "5a")
-  assertMsg "double invert is identity" (invertHex (invertHex "deadbeef") == "deadbeef")
+  -- All values returned as raw hex (two's complement) — no overflow possible
+  assertMsg "int256(-1)" (abiDecodeInt vec_int256_neg1 0 == "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+  assertMsg "int256(-128)" (abiDecodeInt vec_int256_neg128 0 == "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff80")
+  assertMsg "int256(-2)" (abiDecodeInt vec_int256_neg2 0 == "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe")
+  assertMsg "int256(-255)" (abiDecodeInt vec_int256_neg255 0 == "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01")
+  assertMsg "int256(positive 1000)" (abiDecodeInt vec_uint256_1000 0 == "00000000000000000000000000000000000000000000000000000000000003e8")
+  assertMsg "int256(positive 0)" (abiDecodeInt vec_uint256_zero 0 == "0000000000000000000000000000000000000000000000000000000000000000")
+  assertMsg "int256(0) via int256 type" (abiDecodeInt vec_int256_zero 0 == "0000000000000000000000000000000000000000000000000000000000000000")
+  assertMsg "int256(2^63-1)" (abiDecodeInt vec_uint256_max_int64 0 == "0000000000000000000000000000000000000000000000007fffffffffffffff")
+  assertMsg "int256(-2^63)" (abiDecodeInt vec_int256_min_int64 0 == "ffffffffffffffffffffffffffffffffffffffffffffffff8000000000000000")
+  assertMsg "int256(-2^255) min" (abiDecodeInt vec_int256_min 0 == "8000000000000000000000000000000000000000000000000000000000000000")
+  assertMsg "int256(2^255-1) max positive" (abiDecodeInt vec_int256_max_pos 0 == "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 
 -- ---------------------------------------------------------------------------
 -- Tests: dynamic string decoding
@@ -278,7 +409,7 @@ testAbiDecodeString = do
   -- (uint256, string) = (42, "Hello")
   let offset1 = abiReadOffset vec_tuple_uint_string 1
   assertMsg "offset = 64" (offset1 == 64)
-  assertMsg "uint = 42" (abiDecodeUint vec_tuple_uint_string 0 == 42)
+  assertMsg "uint = 42" (abiDecodeUint vec_tuple_uint_string 0 == "000000000000000000000000000000000000000000000000000000000000002a")
   assertMsg "string = Hello" (abiDecodeString vec_tuple_uint_string offset1 == "Hello")
 
   -- (string) = "Hello World"
@@ -318,8 +449,8 @@ testAbiDecodeArray = do
 testAbiDecodeMixed : Script ()
 testAbiDecodeMixed = do
   -- (uint256, string, uint256) = (42, "Hello", 99)
-  assertMsg "first uint = 42" (abiDecodeUint vec_uint_string_uint 0 == 42)
-  assertMsg "last uint = 99" (abiDecodeUint vec_uint_string_uint 2 == 99)
+  assertMsg "first uint = 42" (abiDecodeUint vec_uint_string_uint 0 == "000000000000000000000000000000000000000000000000000000000000002a")
+  assertMsg "last uint = 99" (abiDecodeUint vec_uint_string_uint 2 == "0000000000000000000000000000000000000000000000000000000000000063")
   let strOffset = abiReadOffset vec_uint_string_uint 1
   assertMsg "string offset = 96" (strOffset == 96)
   assertMsg "string = Hello" (abiDecodeString vec_uint_string_uint strOffset == "Hello")
@@ -341,7 +472,7 @@ testAbiDecodeBytes = do
 testAbiDecodeArrayNonZeroOffset : Script ()
 testAbiDecodeArrayNonZeroOffset = do
   -- (uint256, uint256[]) = (7, [100, 200])
-  assertMsg "first static = 7" (abiDecodeUint vec_uint_dynamic_array 0 == 7)
+  assertMsg "first static = 7" (abiDecodeUint vec_uint_dynamic_array 0 == "0000000000000000000000000000000000000000000000000000000000000007")
   let arrOffset = abiReadOffset vec_uint_dynamic_array 1
   assertMsg "array at offset 64" (arrOffset == 64)
   assertMsg "array length = 2" (abiDecodeArrayLen vec_uint_dynamic_array arrOffset == 2)
@@ -372,7 +503,7 @@ testAbiDecodeArrayEdgeCases = do
 testAbiDecodeNestedTuple : Script ()
 testAbiDecodeNestedTuple = do
   -- ABI flattens static inner tuples: (uint256, (address, bool)) → 3 sequential slots
-  assertMsg "outer uint = 42" (abiDecodeUint vec_nested_tuple_uint_addr_bool 0 == 42)
+  assertMsg "outer uint = 42" (abiDecodeUint vec_nested_tuple_uint_addr_bool 0 == "000000000000000000000000000000000000000000000000000000000000002a")
   assertMsg "inner address = vitalik"
     (abiDecodeAddress vec_nested_tuple_uint_addr_bool 1 == "d8da6bf26964af9d7eed9e03e53415d37aa96045")
   assertMsg "inner bool = true" (abiDecodeBool vec_nested_tuple_uint_addr_bool 2 == True)
@@ -392,3 +523,160 @@ testAbiDecodeTwoStrings = do
   -- Decode both strings
   assertMsg "first string = Hello" (abiDecodeString vec_two_strings offset1 == "Hello")
   assertMsg "second string = World" (abiDecodeString vec_two_strings offset2 == "World")
+
+-- ---------------------------------------------------------------------------
+-- Tests: abiStripSelector / abiSelector
+-- ---------------------------------------------------------------------------
+
+testAbiStripSelector : Script ()
+testAbiStripSelector = do
+  let stripped = abiStripSelector vec_calldata_transfer
+  assertMsg "selector = a9059cbb"
+    (abiSelector vec_calldata_transfer == "a9059cbb")
+  assertMsg "stripped address = vitalik"
+    (abiDecodeAddress stripped 0 == "d8da6bf26964af9d7eed9e03e53415d37aa96045")
+  assertMsg "stripped uint = 1000"
+    (abiDecodeUint stripped 1 == "00000000000000000000000000000000000000000000000000000000000003e8")
+  assertMsg "stripped slot count = 2"
+    (abiSlotCount stripped == 2)
+
+-- ---------------------------------------------------------------------------
+-- Tests: dynamic array of dynamic types — string[]
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeArrayDynElem : Script ()
+testAbiDecodeArrayDynElem = do
+  -- string[] = ["Hello", "World"]
+  let arrOffset = abiReadOffset vec_string_array 0
+  assertMsg "string[] offset = 32" (arrOffset == 32)
+  assertMsg "string[] length = 2" (abiDecodeArrayLen vec_string_array arrOffset == 2)
+  let elem0Offset = abiDecodeArrayDynElem vec_string_array arrOffset 0
+  let elem1Offset = abiDecodeArrayDynElem vec_string_array arrOffset 1
+  assertMsg "elem 0 = Hello" (abiDecodeString vec_string_array elem0Offset == "Hello")
+  assertMsg "elem 1 = World" (abiDecodeString vec_string_array elem1Offset == "World")
+
+-- ---------------------------------------------------------------------------
+-- Tests: fixed-size array of dynamic types — string[2]
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeFixedArrayDynElem : Script ()
+testAbiDecodeFixedArrayDynElem = do
+  -- string[2] = ["Hello", "World"]
+  -- string[2] is dynamic, so top-level has an offset pointer
+  let innerOffset = abiReadOffset vec_string_fixed_array 0
+  assertMsg "string[2] offset = 32" (innerOffset == 32)
+  let elem0Offset = abiDecodeFixedArrayDynElem vec_string_fixed_array innerOffset 0
+  let elem1Offset = abiDecodeFixedArrayDynElem vec_string_fixed_array innerOffset 1
+  assertMsg "elem 0 = Hello" (abiDecodeString vec_string_fixed_array elem0Offset == "Hello")
+  assertMsg "elem 1 = World" (abiDecodeString vec_string_fixed_array elem1Offset == "World")
+
+-- ---------------------------------------------------------------------------
+-- Tests: dynamic tuple — (uint256, string, bool)
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeTupleDynMember : Script ()
+testAbiDecodeTupleDynMember = do
+  -- (uint256, string, bool) = (42, "Hello", true)
+  -- Top-level tuple at base offset 0
+  assertMsg "uint = 42" (abiDecodeUint vec_dynamic_tuple 0 == "000000000000000000000000000000000000000000000000000000000000002a")
+  let strOffset = abiDecodeTupleDynMember vec_dynamic_tuple 0 1
+  assertMsg "string offset = 96" (strOffset == 96)
+  assertMsg "string = Hello" (abiDecodeString vec_dynamic_tuple strOffset == "Hello")
+  assertMsg "bool = true" (abiDecodeBool vec_dynamic_tuple 2 == True)
+
+-- ---------------------------------------------------------------------------
+-- Tests: multi-dimensional array — uint256[][]
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeNestedDynArray : Script ()
+testAbiDecodeNestedDynArray = do
+  -- uint256[][] = [[1, 2], [3]]
+  let outerOffset = abiReadOffset vec_nested_dynamic_array 0
+  assertMsg "outer offset = 32" (outerOffset == 32)
+  assertMsg "outer length = 2" (abiDecodeArrayLen vec_nested_dynamic_array outerOffset == 2)
+  -- Inner array [1, 2]
+  let inner0Offset = abiDecodeArrayDynElem vec_nested_dynamic_array outerOffset 0
+  assertMsg "inner[0] length = 2" (abiDecodeArrayLen vec_nested_dynamic_array inner0Offset == 2)
+  assertMsg "inner[0][0] = 1" (hexToInt (abiDecodeArrayElem vec_nested_dynamic_array inner0Offset 0) == 1)
+  assertMsg "inner[0][1] = 2" (hexToInt (abiDecodeArrayElem vec_nested_dynamic_array inner0Offset 1) == 2)
+  -- Inner array [3]
+  let inner1Offset = abiDecodeArrayDynElem vec_nested_dynamic_array outerOffset 1
+  assertMsg "inner[1] length = 1" (abiDecodeArrayLen vec_nested_dynamic_array inner1Offset == 1)
+  assertMsg "inner[1][0] = 3" (hexToInt (abiDecodeArrayElem vec_nested_dynamic_array inner1Offset 0) == 3)
+
+-- ---------------------------------------------------------------------------
+-- Tests: dynamic bytes boundary cases
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeBytesEdgeCases : Script ()
+testAbiDecodeBytesEdgeCases = do
+  -- Exactly 32 bytes of payload (fills one word exactly)
+  let offset32 = abiReadOffset vec_bytes_dynamic_32 0
+  assertMsg "32-byte payload offset" (offset32 == 32)
+  let bytes32 = abiDecodeBytes vec_bytes_dynamic_32 offset32
+  assertMsg "32-byte payload length" (DA.Text.length bytes32 == 64)
+  assertMsg "32-byte payload content" (bytes32 == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+  -- 33 bytes of payload (crosses word boundary)
+  let offset33 = abiReadOffset vec_bytes_dynamic_33 0
+  assertMsg "33-byte payload offset" (offset33 == 32)
+  let bytes33 = abiDecodeBytes vec_bytes_dynamic_33 offset33
+  assertMsg "33-byte payload length" (DA.Text.length bytes33 == 66)
+  assertMsg "33-byte payload content" (bytes33 == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11")
+
+-- ---------------------------------------------------------------------------
+-- Tests: string crossing word boundary
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeString33 : Script ()
+testAbiDecodeString33 = do
+  let offset = abiReadOffset vec_string_33bytes 0
+  assertMsg "33-byte string offset = 32" (offset == 32)
+  assertMsg "33-byte string decoded"
+    (abiDecodeString vec_string_33bytes offset == "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567")
+
+-- ---------------------------------------------------------------------------
+-- Tests: dynamic tuple with string at index 0
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeTupleDynMemberAtIndex0 : Script ()
+testAbiDecodeTupleDynMemberAtIndex0 = do
+  -- (string, uint256, bool) = ("Hello", 99, true)
+  let strOffset = abiDecodeTupleDynMember vec_dynamic_tuple_str_first 0 0
+  assertMsg "string at index 0 = Hello" (abiDecodeString vec_dynamic_tuple_str_first strOffset == "Hello")
+  assertMsg "uint at index 1 = 99" (abiDecodeUint vec_dynamic_tuple_str_first 1 == "0000000000000000000000000000000000000000000000000000000000000063")
+  assertMsg "bool at index 2 = true" (abiDecodeBool vec_dynamic_tuple_str_first 2 == True)
+
+-- ---------------------------------------------------------------------------
+-- Tests: named max uint256 vector
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeUintMax : Script ()
+testAbiDecodeUintMax = do
+  assertMsg "uint256 max" (abiDecodeUint vec_uint256_max 0 == "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+  assertMsg "max is 64 hex chars" (DA.Text.length (abiDecodeUint vec_uint256_max 0) == 64)
+
+-- ---------------------------------------------------------------------------
+-- Tests: empty dynamic bytes (direct, not via string)
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeBytesEmpty : Script ()
+testAbiDecodeBytesEmpty = do
+  let offset = abiReadOffset vec_bytes_empty 0
+  assertMsg "empty bytes offset = 32" (offset == 32)
+  assertMsg "empty bytes = \"\"" (abiDecodeBytes vec_bytes_empty offset == "")
+
+-- ---------------------------------------------------------------------------
+-- Tests: two dynamic members via abiDecodeTupleDynMember
+-- ---------------------------------------------------------------------------
+
+testAbiDecodeTupleTwoDynMembers : Script ()
+testAbiDecodeTupleTwoDynMembers = do
+  -- (string, string) = ("Hello", "World") — reuse vec_two_strings
+  -- Both members are dynamic, so both use offset pointers resolved via abiDecodeTupleDynMember
+  let str0Offset = abiDecodeTupleDynMember vec_two_strings 0 0
+  let str1Offset = abiDecodeTupleDynMember vec_two_strings 0 1
+  assertMsg "first string offset = 64" (str0Offset == 64)
+  assertMsg "second string offset = 128" (str1Offset == 128)
+  assertMsg "first string = Hello" (abiDecodeString vec_two_strings str0Offset == "Hello")
+  assertMsg "second string = World" (abiDecodeString vec_two_strings str1Offset == "World")

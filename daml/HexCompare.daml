@@ -1,0 +1,75 @@
+module HexCompare where
+
+import qualified DA.Text
+import DA.Crypto.Text (BytesHex)
+
+-- ---------------------------------------------------------------------------
+-- Unsigned comparison
+-- ---------------------------------------------------------------------------
+
+-- | Compare two unsigned hex values. Both must be same length (e.g., 64 hex
+-- chars from a 32-byte ABI slot). Lexicographic comparison on same-length
+-- lowercase hex strings is equivalent to numeric comparison.
+hexCompareUint : BytesHex -> BytesHex -> Ordering
+hexCompareUint a b =
+  let aLen = DA.Text.length a
+      bLen = DA.Text.length b
+  in if aLen /= bLen
+     then error ("hexCompareUint: length mismatch (" <> show aLen <> " vs " <> show bLen <> " hex chars)")
+     else compare (DA.Text.asciiToLower a) (DA.Text.asciiToLower b)
+
+hexEqUint : BytesHex -> BytesHex -> Bool
+hexEqUint a b = hexCompareUint a b == EQ
+
+hexGtUint : BytesHex -> BytesHex -> Bool
+hexGtUint a b = hexCompareUint a b == GT
+
+hexGteUint : BytesHex -> BytesHex -> Bool
+hexGteUint a b = hexCompareUint a b /= LT
+
+hexLtUint : BytesHex -> BytesHex -> Bool
+hexLtUint a b = hexCompareUint a b == LT
+
+hexLteUint : BytesHex -> BytesHex -> Bool
+hexLteUint a b = hexCompareUint a b /= GT
+
+-- ---------------------------------------------------------------------------
+-- Signed comparison (two's complement)
+-- ---------------------------------------------------------------------------
+
+-- | Compare two signed hex values (two's complement, same length).
+-- First nibble >= "8" means negative.
+hexCompareInt : BytesHex -> BytesHex -> Ordering
+hexCompareInt a b =
+  let aLen = DA.Text.length a
+      bLen = DA.Text.length b
+  in if aLen /= bLen
+     then error ("hexCompareInt: length mismatch (" <> show aLen <> " vs " <> show bLen <> " hex chars)")
+     else
+      let aLow = DA.Text.asciiToLower a
+          bLow = DA.Text.asciiToLower b
+          aNeg = DA.Text.take 1 aLow >= "8"
+          bNeg = DA.Text.take 1 bLow >= "8"
+      in case (aNeg, bNeg) of
+           (True, False)  -> LT  -- a negative, b positive
+           (False, True)  -> GT  -- a positive, b negative
+           _              -> compare aLow bLow  -- same sign: lexicographic works
+
+-- ---------------------------------------------------------------------------
+-- Utilities
+-- ---------------------------------------------------------------------------
+
+-- | Check if a hex value is zero (all hex chars are '0').
+hexIsZero : BytesHex -> Bool
+hexIsZero hex =
+  let allZeros = DA.Text.implode (replicate (DA.Text.length hex) "0")
+  in DA.Text.asciiToLower hex == allZeros
+
+-- | Left-pad hex to 64 chars (32 bytes) with zeros for ABI slot-width comparison.
+hexPadUint256 : BytesHex -> BytesHex
+hexPadUint256 hex =
+  let hexLen = DA.Text.length hex
+      padLen = 64 - hexLen
+  in if padLen <= 0
+     then DA.Text.take 64 hex
+     else DA.Text.implode (replicate padLen "0") <> hex
