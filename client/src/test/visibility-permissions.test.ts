@@ -18,7 +18,7 @@ import {
   VaultOrchestrator,
   DepositAuthProposal,
   DepositAuthorization,
-  PendingEvmDeposit,
+  PendingEvmTx,
   EcdsaSignature,
   EvmTxOutcomeSignature,
   Erc20Holding,
@@ -33,7 +33,7 @@ const DAR_PATH = resolve(__dirname, "../../../.daml/dist/canton-mpc-poc-0.0.1.da
 const VAULT_ORCHESTRATOR = VaultOrchestrator.templateId;
 const DEPOSIT_AUTH_PROPOSAL = DepositAuthProposal.templateId;
 const DEPOSIT_AUTHORIZATION = DepositAuthorization.templateId;
-const PENDING_EVM_DEPOSIT = PendingEvmDeposit.templateId;
+const PENDING_EVM_TX = PendingEvmTx.templateId;
 const ECDSA_SIGNATURE = EcdsaSignature.templateId;
 const EVM_TX_OUTCOME_SIG = EvmTxOutcomeSignature.templateId;
 const ERC20_HOLDING = Erc20Holding.templateId;
@@ -238,12 +238,12 @@ describe("ledger visibility + permission model", () => {
       undefined,
       [orchDisclosure],
     );
-    const pending = findCreated(pendingResult.transaction.events, "PendingEvmDeposit");
+    const pending = findCreated(pendingResult.transaction.events, "PendingEvmTx");
     const pendingCid = pending.contractId;
-    const { requestId } = pending.createArgument as PendingEvmDeposit;
+    const { requestId } = pending.createArgument as PendingEvmTx;
 
-    // PendingEvmDeposit: signatory=issuer, observer=mpc,requester
-    await assertVisibility(PENDING_EVM_DEPOSIT, pendingCid, [issuer, requester, mpc], []);
+    // PendingEvmTx: signatory=issuer, observer=mpc,requester
+    await assertVisibility(PENDING_EVM_TX, pendingCid, [issuer, requester, mpc], []);
 
     // -- Step 7: SignEvmTx (controller=issuer)
     // Requester cannot exercise issuer-controlled choices
@@ -336,7 +336,7 @@ describe("ledger visibility + permission model", () => {
     await assertVisibility(ERC20_HOLDING, holding.contractId, [issuer, requester], [mpc]);
 
     // Evidence contracts must be archived after claim
-    const remainingPending = await getActiveContracts([issuer], PENDING_EVM_DEPOSIT);
+    const remainingPending = await getActiveContracts([issuer], PENDING_EVM_TX);
     expect(hasContract(remainingPending, pendingCid)).toBe(false);
     const remainingEcdsa = await getActiveContracts([issuer], ECDSA_SIGNATURE);
     expect(hasContract(remainingEcdsa, ecdsaCid)).toBe(false);

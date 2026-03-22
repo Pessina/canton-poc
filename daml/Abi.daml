@@ -1,0 +1,137 @@
+module Abi where
+
+import DA.Optional (fromSomeNote)
+import qualified DA.Text
+import DA.Crypto.Text
+  ( BytesHex
+  , byteCount
+  , fromHex
+  )
+
+-- ---------------------------------------------------------------------------
+-- Core — slot access
+-- ---------------------------------------------------------------------------
+
+-- | Extract the i-th 32-byte slot (0-indexed) from ABI-encoded data.
+-- Each slot = 64 hex chars = 32 bytes. Errors if slot is out of bounds.
+abiSlot : BytesHex -> Int -> BytesHex
+abiSlot hex i =
+  let hexLen = DA.Text.length hex
+      start = i * 64
+  in if start < 0 || start + 64 > hexLen
+     then error ("abiSlot: slot " <> show i <> " out of bounds (data is " <> show (hexLen / 2) <> " bytes)")
+     else DA.Text.take 64 (DA.Text.drop start hex)
+
+-- | Number of 32-byte slots in the ABI-encoded data.
+abiSlotCount : BytesHex -> Int
+abiSlotCount hex = byteCount hex / 32
+
+-- ---------------------------------------------------------------------------
+-- Static type decoders
+-- ---------------------------------------------------------------------------
+
+-- | Decode uint256 at slot i as Int. Errors if value > maxBound Int64.
+-- For large uint256 values, use abiSlot to get raw BytesHex instead.
+abiDecodeUint : BytesHex -> Int -> Int
+abiDecodeUint hex i =
+  let slot = abiSlot hex i
+      result : Optional Int = fromHex slot
+  in fromSomeNote ("abiDecodeUint: overflow or invalid at slot " <> show i) result
+
+-- | Decode bool at slot i.
+abiDecodeBool : BytesHex -> Int -> Bool
+abiDecodeBool hex i =
+  DA.Text.drop 62 (abiSlot hex i) == "01"
+
+-- | Decode address at slot i (20 bytes, strips 12-byte zero padding).
+abiDecodeAddress : BytesHex -> Int -> BytesHex
+abiDecodeAddress hex i =
+  DA.Text.drop 24 (abiSlot hex i)
+
+-- | Decode bytesN at slot i. bytesN is left-aligned (right-padded).
+-- Returns the first n bytes of the slot.
+abiDecodeBytesN : BytesHex -> Int -> Int -> BytesHex
+abiDecodeBytesN hex i n =
+  DA.Text.take (n * 2) (abiSlot hex i)
+
+-- ---------------------------------------------------------------------------
+-- Signed integer decoder
+-- ---------------------------------------------------------------------------
+
+-- | Lowercase a single hex character. Handles both upper and lowercase input.
+lowerHexChar : Text -> Text
+lowerHexChar c = case c of
+  "A" -> "a"; "B" -> "b"; "C" -> "c"; "D" -> "d"; "E" -> "e"; "F" -> "f"
+  _ -> c
+
+-- | Invert a single hex nibble (bitwise NOT). Handles both cases.
+invertNibble : Text -> Text
+invertNibble c = case lowerHexChar c of
+  "0" -> "f"; "1" -> "e"; "2" -> "d"; "3" -> "c"
+  "4" -> "b"; "5" -> "a"; "6" -> "9"; "7" -> "8"
+  "8" -> "7"; "9" -> "6"; "a" -> "5"; "b" -> "4"
+  "c" -> "3"; "d" -> "2"; "e" -> "1"; "f" -> "0"
+  other -> error ("invertNibble: invalid hex char: " <> other)
+
+-- | Nibble-wise bitwise NOT of a hex string.
+invertHex : BytesHex -> BytesHex
+invertHex hex = DA.Text.implode (map invertNibble (DA.Text.explode hex))
+
+-- | Decode signed int256 at slot i as Int. Handles two's complement.
+-- Supported range: [-2^63, 2^63-1]. Errors on overflow outside this range.
+abiDecodeInt : BytesHex -> Int -> Int
+abiDecodeInt hex i =
+  let slot = abiSlot hex i
+      firstNibble = DA.Text.asciiToLower (DA.Text.take 1 slot)
+      isNegative = firstNibble >= "8"
+  in if not isNegative
+     then
+       let result : Optional Int = fromHex slot
+       in fromSomeNote ("abiDecodeInt: positive overflow at slot " <> show i) result
+     else
+       let lastQword = DA.Text.asciiToLower (DA.Text.drop 48 slot)
+       in if lastQword == "8000000000000000"
+          then -9223372036854775808  -- minBound Int64, special-cased to avoid -(maxBound + 1) overflow
+          else
+            let inverted = invertHex lastQword
+                magnitude : Optional Int = fromHex inverted
+            in -(fromSomeNote ("abiDecodeInt: negative overflow at slot " <> show i) magnitude + 1)
+
+-- ---------------------------------------------------------------------------
+-- Dynamic type decoders
+-- ---------------------------------------------------------------------------
+
+-- | Read ABI offset pointer at slot i (byte offset from start of data).
+abiReadOffset : BytesHex -> Int -> Int
+abiReadOffset = abiDecodeUint
+
+-- | Decode dynamic bytes at the given byte offset.
+-- Layout: uint256 length at offset, then raw data bytes.
+abiDecodeBytes : BytesHex -> Int -> BytesHex
+abiDecodeBytes hex byteOffset =
+  let len = abiDecodeUint hex (byteOffset / 32)
+      dataStartChar = (byteOffset + 32) * 2
+  in if len == 0
+     then ""
+     else DA.Text.take (len * 2) (DA.Text.drop dataStartChar hex)
+
+-- | Decode dynamic string at the given byte offset (UTF-8).
+-- Returns "" for zero-length strings.
+abiDecodeString : BytesHex -> Int -> Text
+abiDecodeString hex byteOffset =
+  let raw = abiDecodeBytes hex byteOffset
+  in if raw == ""
+     then ""
+     else
+       let result : Optional Text = fromHex raw
+       in fromSomeNote ("abiDecodeString: invalid UTF-8 at offset " <> show byteOffset) result
+
+-- | Read dynamic array length at the given byte offset.
+abiDecodeArrayLen : BytesHex -> Int -> Int
+abiDecodeArrayLen hex byteOffset = abiDecodeUint hex (byteOffset / 32)
+
+-- | Read the j-th element (0-indexed) of a dynamic array of static 32-byte
+-- elements at the given byte offset. Returns raw 32-byte slot.
+abiDecodeArrayElem : BytesHex -> Int -> Int -> BytesHex
+abiDecodeArrayElem hex byteOffset j =
+  abiSlot hex (byteOffset / 32 + 1 + j)

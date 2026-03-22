@@ -1,0 +1,64 @@
+module RequestId where
+
+import DA.Crypto.Text
+  ( BytesHex
+  , keccak256
+  , toHex
+  )
+
+import Types (EvmTransactionParams(..))
+import Crypto (padHex, hashText, hashBytesList, eip712Hash)
+
+-- ---------------------------------------------------------------------------
+-- EIP-712 type hashes
+-- ---------------------------------------------------------------------------
+
+evmParamsTypeHash : BytesHex
+evmParamsTypeHash = keccak256 (toHex "EvmTransactionParams(address to,string functionSignature,bytes[] args,uint256 value,uint256 nonce,uint256 gasLimit,uint256 maxFeePerGas,uint256 maxPriorityFee,uint256 chainId)")
+
+requestTypeHash : BytesHex
+requestTypeHash = keccak256 (toHex ("CantonMpcDepositRequest(string sender,EvmTransactionParams evmParams,string caip2Id,uint32 keyVersion,string path,string algo,string dest,string authCidText)" <> "EvmTransactionParams(address to,string functionSignature,bytes[] args,uint256 value,uint256 nonce,uint256 gasLimit,uint256 maxFeePerGas,uint256 maxPriorityFee,uint256 chainId)"))
+
+responseTypeHash : BytesHex
+responseTypeHash = keccak256 (toHex "CantonMpcResponse(bytes32 requestId,bytes mpcOutput)")
+
+-- ---------------------------------------------------------------------------
+-- Struct hashing
+-- ---------------------------------------------------------------------------
+
+hashEvmParams : EvmTransactionParams -> BytesHex
+hashEvmParams p =
+  keccak256 $
+       evmParamsTypeHash
+    <> padHex p.to 32
+    <> hashText p.functionSignature
+    <> hashBytesList p.args
+    <> padHex p.value          32
+    <> padHex p.nonce          32
+    <> padHex p.gasLimit       32
+    <> padHex p.maxFeePerGas   32
+    <> padHex p.maxPriorityFee 32
+    <> padHex p.chainId        32
+
+-- ---------------------------------------------------------------------------
+-- Request ID and response hash
+-- ---------------------------------------------------------------------------
+
+computeRequestId : Text -> EvmTransactionParams -> Text -> Int -> Text -> Text -> Text -> Text -> BytesHex
+computeRequestId sender evmParams caip2Id keyVersion path algo dest authCidText =
+  eip712Hash $ keccak256 $
+       requestTypeHash
+    <> hashText sender
+    <> hashEvmParams evmParams
+    <> hashText caip2Id
+    <> padHex (toHex keyVersion) 32
+    <> hashText path
+    <> hashText algo
+    <> hashText dest
+    <> hashText authCidText
+
+computeResponseHash : BytesHex -> BytesHex -> BytesHex
+computeResponseHash requestId output =
+  eip712Hash $ keccak256 (responseTypeHash <> padHex requestId 32 <> safeKeccak256 output)
+  where
+    safeKeccak256 hex = if hex == "" then "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" else keccak256 hex
