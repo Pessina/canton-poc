@@ -15,7 +15,7 @@ const EnvSchema = z.object({
   MPC_ROOT_PRIVATE_KEY: hex,
   ERC20_ADDRESS: hex.default("0xB4F1737Af37711e9A5890D9510c9bB60e170CB0D" as Hex),
   FAUCET_PRIVATE_KEY: hex,
-  VAULT_ID: z.string(),
+  VAULT_ID: z.string().default("default-vault"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
